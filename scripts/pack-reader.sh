@@ -62,7 +62,9 @@ with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive
         source = reader_dir / relative
         if not source.exists():
             raise SystemExit(f"Missing reader file for ZIP: {relative}")
-        archive.write(source, arcname=relative)
+        info = zipfile.ZipInfo(filename=relative.replace("\\", "/"), date_time=(2026, 1, 1, 0, 0, 0))
+        info.compress_type = zipfile.ZIP_DEFLATED
+        archive.writestr(info, source.read_bytes())
 
 digest = hashlib.sha256()
 digest.update(zip_path.read_bytes())
