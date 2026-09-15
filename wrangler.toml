@@ -2,7 +2,7 @@
 # Name must match the dashboard Worker `delta-auto-intelligence`.
 name = "delta-auto-intelligence"
 main = "./worker/index.ts"
-compatibility_date = "2026-09-01"
+compatibility_date = "2026-05-15"
 compatibility_flags = [ "nodejs_compat" ]
 
 # Logical D1 binding used by the app (`DB`).
