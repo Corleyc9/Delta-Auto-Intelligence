@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent } from "react";
+import BrandLogo from "@/app/components/BrandLogo";
 
 export default function LoginScreen({
   loading,
@@ -19,7 +20,7 @@ export default function LoginScreen({
     return (
       <main className="login-shell">
         <div className="login-card">
-          <div className="login-mark">Δ</div>
+          <BrandLogo variant="login" />
           <h1>Delta Auto Intelligence</h1>
           <p>Checking access…</p>
         </div>
@@ -29,8 +30,8 @@ export default function LoginScreen({
   return (
     <main className="login-shell">
       <form className="login-card" onSubmit={onSubmit}>
-        <div className="login-mark">Δ</div>
-        <p className="eyebrow">DELTA AUTO &amp; TOWING</p>
+        <BrandLogo variant="login" />
+        <p className="eyebrow">DELTA AUTO &amp; TOWING · CANTON, MS</p>
         <h1>Delta Auto Intelligence</h1>
         <p>Sign in to view the shop dashboard.</p>
         <label><span>Username</span><input value="delta" readOnly autoComplete="username" /></label>

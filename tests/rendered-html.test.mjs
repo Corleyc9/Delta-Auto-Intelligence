@@ -29,5 +29,9 @@ test("renders development preview metadata", async () => {
     response.headers.get("content-type") ?? "",
     /^text\/html\b/i,
   );
-  assert.match(await response.text(), developmentPreviewMeta);
+  const html = await response.text();
+  assert.match(html, developmentPreviewMeta);
+  assert.match(html, /\/brand\/delta-auto-logo\.png/);
+  assert.match(html, /Delta Auto — We keep you moving!/);
+  assert.match(html, /Delta Auto Intelligence/);
 });
