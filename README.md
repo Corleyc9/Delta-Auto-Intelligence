@@ -168,6 +168,8 @@ Payroll tables, technician targets, GP formulas, and API payload shapes are unch
 
 The shop owns `deltaintelligence.cc`. Merging this PR does not change DNS or the live Worker.
 
+
+
 1. Keep the existing D1 database and R2 bucket. Bind them as `DB` and `BUCKET`. Do not drop live tables; `ensureSchema` only adds missing tables/columns.
 2. Set Worker secrets by name (values stay in Cloudflare, never in git):
    `DASHBOARD_PASSWORD`, `DASHBOARD_SESSION_SECRET`, `PAYROLL_PASSWORD`, `PAYROLL_SESSION_SECRET`, `READER_API_KEY`, `SITES_MACHINE_TOKEN`, `AI_ENCRYPTION_KEY`, `TEKMETRIC_WEBHOOK_PATH_TOKEN`, `TEKMETRIC_WEBHOOK_SECRET`.
