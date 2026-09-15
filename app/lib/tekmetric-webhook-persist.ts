@@ -150,7 +150,7 @@ async function applyWebhookSideEffects(
         effect.decision === "approved" ? "last_approval" : "last_decline",
         event.eventName,
         effect.roNumber,
-        `Work ${effect.decision}${effect.hours != null ? ` (${effect.hours} hrs in payload)` : " (hours pending reader)"}`,
+        `Work ${effect.decision}${effect.hours != null ? ` (${effect.hours} hrs from webhook)` : " (hours pending reader)"}`,
         occurredAt,
         eventId,
       );
