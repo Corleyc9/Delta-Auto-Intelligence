@@ -19,21 +19,23 @@ Tekmetric shop URLs are shop **4326**. Do not invent new shop IDs, pay tables, o
 
 ## Local development
 
-Requires Node.js `>=22.13.0`, Python 3, and Linux helpers (`flock`, GNU `timeout`) for the Sites-oriented scripts.
+Requires Node.js `>=22.13.0` and Linux helpers (`flock`, GNU `timeout`) for the Sites-oriented scripts. Python 3 is only needed to run the Windows-reader parser fixtures (`reader/tests`); Cloudflare Workers Git builds pack the downloadable ZIP with Node and do not need `python3`.
 
 ```bash
 npm run install:ci          # locked Sites install; uses scripts/sites-env.sh
 # If install:ci cannot run outside the Sites image:
 npm ci
 
-npm run pack:reader         # rebuilds public/downloads/delta-auto-reader.zip
+npm run pack:reader         # rebuilds public/downloads/delta-auto-reader.zip (Node, no python3)
 npm run build               # packs the reader, then vinext build + artifact check
-npm test                    # pack, build, Node tests, Python parser fixtures
+npm test                    # pack, build, Node tests; Python parser fixtures when python3 exists
 npm run validate:artifact   # checks dist/server/index.js after a build
 npm run dev                 # local Vite/Wrangler preview
 ```
 
 `npm run pack:reader` is also invoked by `npm run build`, so changing any file under `reader/` and building refreshes the downloadable ZIP, `reader/build-hash.json`, and `public/reader-version.json`. Those three must always share the same 12-character hash.
+
+Worker name and bindings for `npx wrangler deploy` are in `wrangler.toml`: Worker `delta-auto-intelligence`, D1 `DB`, R2 `BUCKET` (runtime also accepts a legacy R2 binding named `delta_auto_lot_walks`).
 
 ## Secrets (names only)
 
@@ -52,7 +54,7 @@ Configure these on the Worker. Never commit values.
 | `TEKMETRIC_WEBHOOK_SECRET` | Optional shared secret. Put it in the webhook URL as `?secret=...` (Tekmetric’s Custom Integration UI is name + URL + event checkboxes; it does not document HMAC). Also accepted as `X-Tekmetric-Webhook-Secret`, `Authorization: Bearer`, or HMAC-SHA256 if a signature header is ever sent. |
 | `TEKMETRIC_SHOP_ID` | Optional. Defaults to `4326`. Events with a different shop id are stored but do not change shop signals. |
 
-Logical bindings in `.openai/hosting.json`: `d1` = `DB`, `r2` = `BUCKET`. This rebuild does not reuse the previous Sites `project_id`.
+Logical bindings in `wrangler.toml` and `.openai/hosting.json`: `d1` = `DB`, `r2` = `BUCKET`. This rebuild does not reuse the previous Sites `project_id`.
 
 ## Windows reader install
 

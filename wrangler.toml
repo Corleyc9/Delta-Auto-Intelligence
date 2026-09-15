@@ -1,0 +1,22 @@
+# Cloudflare Worker used by Git builds (`npx wrangler deploy`).
+# Name must match the dashboard Worker `delta-auto-intelligence`.
+name = "delta-auto-intelligence"
+main = "./worker/index.ts"
+compatibility_date = "2026-09-01"
+compatibility_flags = [ "nodejs_compat" ]
+
+# Logical D1 binding used by the app (`DB`).
+# This is the D1 database on the Worker account (replacing the ChatGPT Sites placeholder).
+[[d1_databases]]
+binding = "DB"
+database_name = "delta-auto-intelligence"
+database_id = "e46dab4e-fd0b-449b-b50a-657cba9e737c"
+
+# Logical R2 binding used by the app (`BUCKET`).
+# Runtime also accepts a legacy binding named `delta_auto_lot_walks` (see app/lib/r2.ts).
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "delta-auto-lot-walks"
+
+[images]
+binding = "IMAGES"
