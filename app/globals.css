@@ -223,6 +223,51 @@ button { color: inherit; }
 .reader-revision-strip span { color: var(--steel); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .reader-revision-strip code { color: var(--accent-hot); font-size: 12px; }
 .reader-revision-strip em { color: #f2a93b; font-style: normal; }
+.webhook-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0 0 18px;
+  padding: 8px 12px;
+  border: 1px solid rgba(91,154,212,.35);
+  border-radius: 8px;
+  background: rgba(61,126,184,.08);
+  color: var(--muted);
+  font-size: 12px;
+}
+.webhook-strip span { color: var(--accent-hot); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.webhook-strip strong { color: var(--white); }
+.webhook-strip em { color: var(--steel); font-style: normal; }
+.webhook-live-panel {
+  margin: 0 0 22px;
+  padding: 18px 20px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.webhook-live-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.webhook-live-grid article {
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(14,23,33,.9);
+}
+.webhook-live-grid p {
+  margin: 0 0 6px;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.webhook-live-grid strong { display: block; font-size: 16px; }
+.webhook-live-grid small { display: block; margin-top: 6px; color: var(--steel); font-size: 11px; }
 .reader-hash-line { margin: 0 0 16px; color: var(--muted); font-size: 12px; }
 .reader-hash-line code { color: var(--accent-hot); }
 .download-hash { display: block; margin: 8px 0 0; color: var(--steel); font-size: 11px; text-align: center; }
@@ -514,6 +559,7 @@ button { color: inherit; }
   .team-hours-summary { grid-column: 1 / -1; }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .analysis-grid { grid-template-columns: 1fr; }
+  .webhook-live-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
@@ -534,6 +580,7 @@ button { color: inherit; }
   .demo-banner { align-items: flex-start; flex-wrap: wrap; }
   .demo-banner button { margin-left: 0; }
   .kpi-grid { grid-template-columns: 1fr; }
+  .webhook-live-grid { grid-template-columns: 1fr; }
   .kpi-card { min-height: 140px; }
   .tech-row { grid-template-columns: 105px 1fr; }
   .hours { grid-column: 2; }

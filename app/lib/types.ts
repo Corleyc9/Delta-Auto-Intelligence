@@ -303,3 +303,47 @@ export type ReaderRevision = {
   version: string;
   buildHash: string;
 };
+
+export type TekmetricLiveSignal = {
+  key: string;
+  eventName: string;
+  roNumber: string;
+  detail: string;
+  occurredAt: string;
+  receivedAt: string;
+};
+
+export type TekmetricLiveEvent = {
+  id: number;
+  family: string;
+  eventName: string;
+  sourceEvent: string;
+  roNumber: string;
+  appointmentId: string;
+  label: string;
+  decision: string;
+  hours: number | null;
+  occurredAt: string | null;
+  receivedAt: string;
+  effects: string[];
+};
+
+export type TekmetricLiveEvents = {
+  lastEventAt: string | null;
+  signals: {
+    overviewFreshness: TekmetricLiveSignal | null;
+    posted: TekmetricLiveSignal | null;
+    completed: TekmetricLiveSignal | null;
+    ar: TekmetricLiveSignal | null;
+    payment: TekmetricLiveSignal | null;
+    unposted: TekmetricLiveSignal | null;
+    lastApproval: TekmetricLiveSignal | null;
+    lastDecline: TekmetricLiveSignal | null;
+    scheduleChanged: TekmetricLiveSignal | null;
+    warrantyLabel: TekmetricLiveSignal | null;
+    labelChange: TekmetricLiveSignal | null;
+    orderReceived: TekmetricLiveSignal | null;
+    inspection: TekmetricLiveSignal | null;
+  };
+  recentEvents: TekmetricLiveEvent[];
+};

@@ -20,6 +20,7 @@ import type {
   ReaderStatus,
   RepairOrder,
   ScheduleSnapshot,
+  TekmetricLiveEvents,
   TicketAudit,
   VerificationRecord,
   WarrantyClaim,
@@ -103,6 +104,7 @@ export default function Home() {
   const [warrantySaving, setWarrantySaving] = useState<string | null>(null);
   const [verificationView, setVerificationView] = useState<"pending" | "history">("pending");
   const [jobBoardCapturedAt, setJobBoardCapturedAt] = useState<string | null>(null);
+  const [webhookEvents, setWebhookEvents] = useState<TekmetricLiveEvents | null>(null);
   const [jobSection, setJobSection] = useState<"all" | RepairOrder["section"]>("work-in-progress");
   const [jobCategory, setJobCategory] = useState("all");
   const [jobWriter, setJobWriter] = useState("all");
@@ -326,6 +328,7 @@ export default function Home() {
     refreshJobBoard();
     refreshVerifications();
     refreshWarrantyClaims();
+    refreshWebhookEvents();
     fetch("/api/ticket-audits", { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => {
@@ -354,6 +357,13 @@ export default function Home() {
       setLastWeekWriters(null);
     });
   }, []);
+
+  function refreshWebhookEvents() {
+    return fetch("/api/tekmetric-events", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => setWebhookEvents(payload?.lastEventAt || payload?.signals ? payload : null))
+      .catch(() => setWebhookEvents(null));
+  }
 
   function refreshJobBoard() {
     return fetch("/api/job-board", { cache: "no-store" })
@@ -511,6 +521,7 @@ export default function Home() {
       refreshVerifications();
       refreshDeltaAiAudits();
       refreshWarrantyClaims();
+      refreshWebhookEvents();
     }, 30 * 1000);
     return () => window.clearInterval(timer);
   }, []);
@@ -1163,6 +1174,8 @@ export default function Home() {
       refreshWarrantyClaims,
       refreshScheduleHistory,
       refreshDeltaAiAudits,
+      refreshWebhookEvents,
+      webhookEvents,
       updateGoalDisposition,
       businessQueue,
       personalQueue,
@@ -1217,6 +1230,7 @@ export default function Home() {
           capturedAt={selectedLive?.capturedAt}
           readerStatus={readerStatus as any}
           packagedRevision={readerRevision}
+          webhookEvents={webhookEvents}
           onOpenReader={() => setConnectionOpen(true)}
         />
         {nav === "Payroll" ? (

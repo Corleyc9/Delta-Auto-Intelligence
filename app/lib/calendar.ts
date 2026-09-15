@@ -52,3 +52,16 @@ export function reportingWeekKey(value: Date) {
   localDate.setUTCDate(localDate.getUTCDate() - ((localDate.getUTCDay() - 3 + 7) % 7));
   return localDate.toISOString().slice(0, 10);
 }
+
+export function weekContext(capturedAt: string) {
+  const capturedLocal = new Date(capturedAt);
+  const weekKey = reportingWeekKey(capturedLocal);
+  const weekStart = new Date(`${weekKey}T00:00:00Z`);
+  const capturedParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(capturedLocal);
+  const capturedPart = (type: string) => Number(capturedParts.find((part) => part.type === type)?.value || 0);
+  const capturedDay = new Date(Date.UTC(capturedPart("year"), capturedPart("month") - 1, capturedPart("day")));
+  const daysIntoWeek = Math.max(0, Math.floor((capturedDay.getTime() - weekStart.getTime()) / 86400000));
+  return { weekKey, daysIntoWeek };
+}

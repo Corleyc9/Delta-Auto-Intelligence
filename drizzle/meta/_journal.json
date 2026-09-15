@@ -15,6 +15,13 @@
       "when": 1757945400000,
       "tag": "0001_consolidate_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1757949800000,
+      "tag": "0002_tekmetric_webhooks",
+      "breakpoints": true
     }
   ]
 }
