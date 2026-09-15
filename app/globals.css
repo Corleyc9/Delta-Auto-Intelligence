@@ -36,8 +36,8 @@ button { color: inherit; }
 .login-mark { width: 56px; height: 56px; display: grid; place-items: center; margin-bottom: 24px; border: 1px solid #3d5368; border-radius: 13px; color: var(--accent-hot); font-size: 28px; font-weight: 900; }
 .brand-logo { display: block; height: auto; max-width: 100%; }
 .brand-logo-login { width: min(100%, 400px); margin: 0 auto 10px; }
-.brand-logo-header { width: min(220px, 36vw); min-width: 156px; flex: 0 0 auto; }
-.topbar-brand { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.brand-logo-header { width: min(300px, 40vw); min-width: 210px; flex: 0 0 auto; }
+.topbar-brand { display: flex; align-items: center; gap: 20px; min-width: 0; }
 .login-card h1 { margin: 8px 0; font-family: Impact, "Arial Narrow", sans-serif; font-size: clamp(28px, 5vw, 38px); font-weight: 500; }
 .login-card > p:not(.eyebrow) { margin: 0 0 25px; color: var(--muted); }
 .login-card label { display: grid; gap: 7px; margin-top: 16px; color: var(--muted); font-size: 12px; font-weight: 700; }
@@ -578,7 +578,7 @@ button { color: inherit; }
   .workspace { padding: 20px 15px 88px; }
   .topbar { align-items: flex-start; }
   .topbar-brand { align-items: flex-start; flex-wrap: wrap; }
-  .brand-logo-header { width: min(280px, 82vw); min-width: 0; }
+  .brand-logo-header { width: min(300px, 86vw); min-width: 0; }
   .topbar-actions { flex-direction: column; align-items: stretch; }
   .status-pill { display: none; }
   .range-picker { height: auto; min-height: 50px; display: grid; grid-template-columns: auto 1fr; }
