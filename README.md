@@ -17,6 +17,10 @@ This repository does **not** publish to `deltaintelligence.cc`. Domain cutover i
 
 Tekmetric shop URLs are shop **4326**. Do not invent new shop IDs, pay tables, or target numbers.
 
+## Ask GM backup (Grok Bot)
+
+While signed in, the dashboard header includes **Ask GM backup** next to Sign out. That control is a deep link into the **Grok Bot desktop app** (`grokbot://…`) for Devin’s shop GM backup chat. The Grok Bot app must be installed on the machine; the dashboard does not host that conversation itself.
+
 ## Local development
 
 Requires Node.js `>=22.13.0` and Linux helpers (`flock`, GNU `timeout`) for the Sites-oriented scripts. Python 3 is only needed to run the Windows-reader parser fixtures (`reader/tests`); Cloudflare Workers Git builds pack the downloadable ZIP with Node and do not need `python3`.
