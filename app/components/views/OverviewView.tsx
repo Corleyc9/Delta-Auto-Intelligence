@@ -2,7 +2,8 @@
 
 import { useDashboard } from "@/app/dashboard-context";
 import Icon from "../Icon";
-import { money } from "@/app/lib/format";
+import { money, relativeTime } from "@/app/lib/format";
+import type { TekmetricLiveSignal } from "@/app/lib/types";
 
 export default function OverviewView() {
   const {
@@ -55,6 +56,7 @@ export default function OverviewView() {
     chartPoints,
     askAI,
     usePrompt,
+    webhookEvents,
   } = useDashboard();
   return (
     <>
@@ -154,6 +156,34 @@ export default function OverviewView() {
             </div>
           </article>
         </section>
+
+        {webhookEvents?.lastEventAt && (
+          <section className="webhook-live-panel" aria-label="Live Tekmetric webhook signals">
+            <div className="recovery-heading">
+              <div>
+                <p className="panel-kicker">CUSTOM INTEGRATION</p>
+                <h2>Live Tekmetric Events</h2>
+              </div>
+              <span>Webhooks do not replace the shop PC reader</span>
+            </div>
+            <div className="webhook-live-grid">
+              {([
+                ["Posted / Complete / A/R / Payment", webhookEvents.signals.overviewFreshness],
+                ["Work approved", webhookEvents.signals.lastApproval],
+                ["Work declined", webhookEvents.signals.lastDecline],
+                ["Schedule", webhookEvents.signals.scheduleChanged],
+                ["Verify / label watch", webhookEvents.signals.labelChange],
+                ["Warranty label", webhookEvents.signals.warrantyLabel],
+              ] as Array<[string, TekmetricLiveSignal | null]>).map(([label, signal]) => (
+                <article key={String(label)}>
+                  <p>{label}</p>
+                  <strong>{signal ? relativeTime(signal.occurredAt || signal.receivedAt) : "—"}</strong>
+                  <small>{signal ? signal.detail : "No webhook yet"}</small>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
 
         {selectedLive && (
           <section className="recovery-panel" aria-label="Goal recovery based on current pace">

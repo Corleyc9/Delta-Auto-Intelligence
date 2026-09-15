@@ -1,6 +1,7 @@
 "use client";
 
-import type { ReaderRevision, ReaderStatus } from "@/app/lib/types";
+import { relativeTime } from "@/app/lib/format";
+import type { ReaderRevision, ReaderStatus, TekmetricLiveEvents } from "@/app/lib/types";
 
 export default function StatusBanners({
   live,
@@ -8,6 +9,7 @@ export default function StatusBanners({
   capturedAt,
   readerStatus,
   packagedRevision,
+  webhookEvents,
   onOpenReader,
 }: {
   live: boolean;
@@ -15,6 +17,7 @@ export default function StatusBanners({
   capturedAt?: string;
   readerStatus: ReaderStatus | null;
   packagedRevision: ReaderRevision | null;
+  webhookEvents: TekmetricLiveEvents | null;
   onOpenReader: () => void;
 }) {
   const statusLabel =
@@ -47,6 +50,21 @@ export default function StatusBanners({
           <code>{packagedRevision.buildHash}</code>
           {readerStatus?.buildHash && readerStatus.buildHash !== packagedRevision.buildHash && (
             <em>Shop PC is on {readerStatus.version || "unknown"}/{readerStatus.buildHash} — reinstall from Download.</em>
+          )}
+        </div>
+      )}
+      {webhookEvents?.lastEventAt && (
+        <div className="webhook-strip">
+          <span>Tekmetric webhooks</span>
+          <strong>Last event {relativeTime(webhookEvents.lastEventAt)}</strong>
+          {webhookEvents.signals.overviewFreshness && (
+            <em>{webhookEvents.signals.overviewFreshness.detail}</em>
+          )}
+          {webhookEvents.signals.lastApproval && (
+            <em>{webhookEvents.signals.lastApproval.detail}</em>
+          )}
+          {webhookEvents.signals.scheduleChanged && (
+            <em>{webhookEvents.signals.scheduleChanged.detail}</em>
           )}
         </div>
       )}

@@ -23,7 +23,7 @@ export default function ReaderSetupModal({
         <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
         <p className="panel-kicker">WINDOWS SHOP COMPUTER</p>
         <h2 id="reader-title">Connect the Tekmetric Reader</h2>
-        <p className="modal-intro">This computer will remain signed into Tekmetric and securely send read-only report totals to your dashboard.</p>
+        <p className="modal-intro">This computer will remain signed into Tekmetric and securely send read-only report totals to your dashboard. Custom Integration webhooks can add live RO/appointment events, but they do not replace this reader for reports, Job Board detail, WIP audits, Steer, or NAPA.</p>
         {packagedRevision && (
           <p className="reader-hash-line">
             Packaged reader {packagedRevision.version} · hash <code>{packagedRevision.buildHash}</code>
