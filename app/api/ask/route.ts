@@ -1,9 +1,6 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
-
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 function fromBase64(value: string): ArrayBuffer {
   const binary = atob(value);
@@ -74,6 +71,7 @@ export async function POST(request: Request) {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
+  await ensureSchema(env.DB);
   const body = await request.json() as { question?: string; period?: string };
   const question = body.question?.trim() ?? "";
   if (!question || question.length > 600) {

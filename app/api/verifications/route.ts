@@ -1,34 +1,7 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS ro_verification_cycles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ro_number TEXT NOT NULL,
-      customer TEXT NOT NULL,
-      vehicle TEXT NOT NULL,
-      service_writer TEXT NOT NULL,
-      detail_url TEXT NOT NULL DEFAULT '',
-      amount REAL NOT NULL DEFAULT 0,
-      section TEXT NOT NULL,
-      diagnosed_at TEXT NOT NULL,
-      verify_label_seen_at TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
-      verified_at TEXT,
-      verified_by TEXT,
-      verification_note TEXT NOT NULL DEFAULT '',
-      last_seen_at TEXT NOT NULL
-    )`),
-    env.DB.prepare(`CREATE INDEX IF NOT EXISTS ro_verification_status_idx
-      ON ro_verification_cycles (status, diagnosed_at DESC)`),
-  ]);
-}
 
 function record(row: Record<string, unknown>) {
   return {
@@ -47,7 +20,7 @@ export async function GET() {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const rows = await env.DB.prepare(`SELECT * FROM ro_verification_cycles
     ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, diagnosed_at DESC LIMIT 1000`)
     .all<Record<string, unknown>>();
@@ -61,7 +34,7 @@ export async function PATCH(request: Request) {
   const id = Math.floor(Number(body.id));
   if (!id || id < 1) return Response.json({ error: "Invalid verification record." }, { status: 400 });
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const verifiedAt = new Date().toISOString();
   const verifiedBy = auth.displayName || auth.email || "Dashboard user";
   const note = String(body.note || "").trim().slice(0, 600);

@@ -1,4 +1,6 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 type ScheduleAppointment = {
   employee?: string;
@@ -8,50 +10,13 @@ type ScheduleAppointment = {
   color?: string;
 };
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS schedule_snapshots (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      schedule_date TEXT NOT NULL,
-      hour_key TEXT NOT NULL,
-      hour_label TEXT NOT NULL,
-      employees_json TEXT NOT NULL,
-      appointments_json TEXT NOT NULL,
-      raw_text TEXT NOT NULL DEFAULT '',
-      captured_at TEXT NOT NULL,
-      UNIQUE(schedule_date, hour_key)
-    )`),
-    env.DB.prepare(`CREATE INDEX IF NOT EXISTS schedule_snapshots_date_idx
-      ON schedule_snapshots (schedule_date DESC, hour_key DESC)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS schedule_capture_request (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      status TEXT NOT NULL,
-      requested_at TEXT NOT NULL,
-      completed_at TEXT
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS schedule_snapshot_images (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      schedule_date TEXT NOT NULL,
-      hour_key TEXT NOT NULL,
-      object_key TEXT NOT NULL,
-      captured_at TEXT NOT NULL,
-      UNIQUE(schedule_date, hour_key)
-    )`),
-  ]);
-}
 
 export async function GET(request: Request) {
   const env = await runtimeEnv();
   const machineAuthorized = Boolean(
     env.READER_API_KEY && request.headers.get("x-reader-key") === env.READER_API_KEY,
   );
-  await initialize();
+  await ensureSchema(env.DB);
   if (machineAuthorized) {
     const pending = await env.DB.prepare(
       "SELECT requested_at FROM schedule_capture_request WHERE id = 1 AND status = 'pending'",
@@ -91,7 +56,7 @@ export async function POST(request: Request) {
   const machineAuthorized = Boolean(
     env.READER_API_KEY && request.headers.get("x-reader-key") === env.READER_API_KEY,
   );
-  await initialize();
+  await ensureSchema(env.DB);
   if (!machineAuthorized) {
     const auth = await requireApiUser();
     if (auth instanceof Response) return auth;

@@ -1,9 +1,6 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
-
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 function fromBase64(value: string): ArrayBuffer {
   const binary = atob(value);
@@ -26,22 +23,12 @@ async function encryptionKey(secret: string): Promise<CryptoKey> {
   );
 }
 
-async function initialize(env: any) {
-  await env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS app_secrets (
-      name TEXT PRIMARY KEY,
-      encrypted_value TEXT NOT NULL,
-      iv TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `).run();
-}
 
 export async function GET() {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize(env);
+  await ensureSchema(env.DB);
   const row = await env.DB.prepare(
     "SELECT updated_at FROM app_secrets WHERE name = 'openai_api_key'",
   ).first() as { updated_at: string } | null;
@@ -81,7 +68,7 @@ export async function POST(request: Request) {
     key,
     new TextEncoder().encode(apiKey),
   );
-  await initialize(env);
+  await ensureSchema(env.DB);
   await env.DB.prepare(`
     INSERT INTO app_secrets (name, encrypted_value, iv, updated_at)
     VALUES ('openai_api_key', ?, ?, ?)

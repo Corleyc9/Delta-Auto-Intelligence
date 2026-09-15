@@ -1,12 +1,9 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 // The background reader may use its machine key. A signed-in manager may also
 // save a reviewed result from the protected Lot Walk page.
-
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
 
 export async function POST(
   request: Request,
@@ -31,6 +28,7 @@ export async function POST(
     ? body.status
     : "complete";
   const now = new Date().toISOString();
+  await ensureSchema(env.DB);
 
   await env.DB.prepare(`
     UPDATE lot_walk_audits

@@ -1,4 +1,6 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 type Opportunity = {
   key: string;
@@ -12,36 +14,12 @@ type Opportunity = {
   customerType: "business" | "personal" | "unclassified";
 };
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS steer_opportunity_snapshots (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      opportunities_json TEXT NOT NULL,
-      captured_at TEXT NOT NULL
-    )
-  `).run();
-  await env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS steer_opportunity_actions (
-      opportunity_key TEXT NOT NULL,
-      list_date TEXT NOT NULL,
-      status TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY (opportunity_key, list_date)
-    )
-  `).run();
-}
 
 export async function GET() {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const row = await env.DB.prepare(`
     SELECT opportunities_json, captured_at
     FROM steer_opportunity_snapshots
@@ -85,7 +63,7 @@ export async function POST(request: Request) {
     if (!key || !listDate || !["open", "done", "follow-up", "skipped"].includes(String(status))) {
       return Response.json({ error: "Invalid lead action" }, { status: 400 });
     }
-    await initialize();
+    await ensureSchema(env.DB);
     await env.DB.prepare(`
       INSERT INTO steer_opportunity_actions (opportunity_key, list_date, status, updated_at)
       VALUES (?, ?, ?, ?)
@@ -118,7 +96,13 @@ export async function POST(request: Request) {
       : "unclassified",
   })).filter((item) => item.key && item.customer && item.vehicle);
 
-  await initialize();
+  if (!opportunities.length) {
+    return Response.json({
+      error: "Empty Steer snapshot rejected; last valid call list preserved.",
+    }, { status: 422 });
+  }
+
+  await ensureSchema(env.DB);
   const capturedAt = body.capturedAt || new Date().toISOString();
   await env.DB.prepare(`
     INSERT INTO steer_opportunity_snapshots (opportunities_json, captured_at)

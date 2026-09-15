@@ -7,7 +7,7 @@
 # any other site — nothing sensitive is typed into this terminal.
 
 $ErrorActionPreference = "Stop"
-Write-Host "Delta Auto Intelligence -- Cloudflare deploy" -ForegroundColor Red
+Write-Host "Delta Auto Intelligence -- Cloudflare deploy" -ForegroundColor Cyan
 Write-Host ""
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {

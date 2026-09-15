@@ -7,40 +7,37 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import requests
 from requests.adapters import HTTPAdapter
 from playwright.sync_api import Page, sync_playwright
 from urllib3.util.retry import Retry
 
-ROOT = Path(os.environ.get("LOCALAPPDATA", ".")) / "DeltaAutoReader"
-CONFIG_PATH = ROOT / "reader-config.json"
-PROFILE_PATH = ROOT / "browser-profile"
-LOG_PATH = ROOT / "reader.log"
-ROSTER_PATH = ROOT / "technician-roster.json"
-HISTORY_PROGRESS_PATH = ROOT / "vehicle-history-progress.json"
-SHOP_REPORT_URL = "https://shop.tekmetric.com/admin/shop/4326/reports"
-JOB_BOARD_URL = (
-    "https://shop.tekmetric.com/admin/shop/4326/repair-orders"
-    "?view=column&board=ACTIVE&page=0"
+from config import (
+    CENTRAL_TIME,
+    CONFIG_PATH,
+    DEFAULT_TECHNICIANS,
+    HISTORY_PROGRESS_PATH,
+    JOB_BOARD_LABELS,
+    JOB_BOARD_URL,
+    LOG_PATH,
+    PROFILE_PATH,
+    ROOT,
+    ROSTER_PATH,
+    SCHEDULE_URL,
+    SERVICE_WRITER_PRIORITY,
+    SERVICE_WRITERS,
+    SHOP_REPORT_URL,
+    STEER_HOT_LIST_URL,
+    Config,
+    save_config,
 )
-SCHEDULE_URL = "https://shop.tekmetric.com/admin/shop/4326/appointments"
-STEER_HOT_LIST_URL = (
-    "https://app.steercrm.com/tenant/ae9659c1-a1c8-4825-b9b1-5835f669fd05/"
-    "shop/8c71b3aa-71b6-4f91-972f-73c206abad54/opportunity-hub/"
-    "today's-hot-list?pageSize=100&page=1"
-)
-DEFAULT_TECHNICIANS = [
-    "Mario Butler",
-    "MIKE COOK",
-    "Beau Corley",
-    "Stacy Williams",
-]
-CENTRAL_TIME = ZoneInfo("America/Chicago")
+from numeric import currency, number
+from parsers.job_board import job_category, parse_age_days, parse_job_card
+from parsers.steer import classify_customer, parse_steer_row
+from version import READER_BUILD_HASH, READER_REVISION, READER_VERSION
+
 HTTP = requests.Session()
 HTTP.mount("https://", HTTPAdapter(max_retries=Retry(
     total=3,
@@ -52,39 +49,7 @@ HTTP.mount("https://", HTTPAdapter(max_retries=Retry(
     allowed_methods=frozenset({"GET", "POST"}),
     raise_on_status=False,
 )))
-SERVICE_WRITERS = {
-    "AW": "Andrea Wilson",
-    "DC": "Devin Corley",
-    "KW": "Kody Whobrey",
-    "PH": "Pat Hall",
-    "SP": "Shop Parts",
-}
-SERVICE_WRITER_PRIORITY = ("AW", "KW", "PH", "SP", "DC")
-JOB_BOARD_LABELS = (
-    "Not Started", "Check-In Needed", "Check-In Complete", "Verify", "Verify Parts&Labor",
-    "Requires Authorization", "Pending Authorization", "Declined All",
-    "Waiting for Arrival", "Needs Estimate", "72HRS+", "Estimate Only",
-    "Waiting for Parts", "Manager Assist/Approve", "Need Key (DeltaTowing)",
-    "BIG DADDY (New)", "Attn. Service Writer", "No Show", "Work Not Started",
-    "Waiting/Cust. or Unit", "Needs Diag.", "Verify Parts/Labor",
-    "Waiting 4 approval", "Need to Order Parts", "Waiting on Parts", "Part Arrived",
-    "Scheduled", "In-Progress", "Attn Technician", "Attn Service Writer",
-    "Verified/Send Estimate", "Waiting on Sublet", "Tech Finished", "BIG DADDY",
-    "Ext.Warranty/3rdParty", "Needs Check-In", "Mgr Assist or Approve",
-    "Need Mileage /Insp", "Balance Due", "Credit Due", "Customer Contacted",
-    "Ready to Post", "Waiting for PO#", "Payment Link Sent",
-    "Needs Ext Warr Payment", "Need Warranty Pmt", "Need Warranty Payment", "Abandonment Process",
-    "Documentation", "Start Labor Lien", "Send for Payment",
-    "Mgr. Assist or Approve", "DO NOT TOUCH - SEE PAT", "Warranty Claim Done",
-)
-
-
-@dataclass
-class Config:
-    dashboard_url: str
-    reader_api_key: str
-    sites_machine_token: str
-    sync_minutes: int = 1
+LOCK_PATH = ROOT / "reader.lock"
 
 
 def log(message: str) -> None:
@@ -120,8 +85,7 @@ def configure() -> Config:
     reader_key = input("Reader key: ").strip()
     sites_token = input("Machine access token: ").strip()
     config = Config(dashboard, reader_key, sites_token)
-    ROOT.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
+    save_config(config)
     print(f"\nConfiguration saved to {CONFIG_PATH}")
     return config
 
@@ -130,16 +94,6 @@ def load_config() -> Config:
     if not CONFIG_PATH.exists():
         return configure()
     return Config(**json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
-
-
-def currency(value: str) -> float:
-    cleaned = re.sub(r"[^0-9.\-]", "", value or "")
-    return float(cleaned or 0)
-
-
-def number(value: str) -> float:
-    match = re.search(r"-?\d+(?:\.\d+)?", value or "")
-    return float(match.group(0)) if match else 0
 
 
 def click_text(page: Page, label: str) -> None:
@@ -726,6 +680,14 @@ def extract_service_writers(page: Page) -> list[dict]:
 
 
 def post_snapshot(config: Config, payload: dict) -> None:
+    technicians = payload.get("technicians") or []
+    total_sales = float(payload.get("totalSales") or 0)
+    total_ros = float(payload.get("totalROs") or 0)
+    if not technicians and total_sales == 0 and total_ros == 0:
+        raise RuntimeError(
+            f"Refusing to post an empty {payload.get('period', 'unknown')} shop snapshot "
+            "so the last valid dashboard state is preserved."
+        )
     response = HTTP.post(
         f"{config.dashboard_url}/api/snapshot",
         json=payload,
@@ -750,7 +712,12 @@ def post_reader_status(config: Config, status: str, detail: str = "") -> None:
     try:
         response = HTTP.post(
             f"{config.dashboard_url}/api/reader-status",
-            json={"status": status, "detail": detail},
+            json={
+                "status": status,
+                "detail": detail,
+                "version": READER_VERSION,
+                "buildHash": READER_BUILD_HASH,
+            },
             headers={
                 "x-reader-key": config.reader_api_key,
                 "OAI-Sites-Authorization": f"Bearer {config.sites_machine_token}",
@@ -763,6 +730,10 @@ def post_reader_status(config: Config, status: str, detail: str = "") -> None:
 
 
 def post_opportunities(config: Config, opportunities: list[dict]) -> None:
+    if not opportunities:
+        raise RuntimeError(
+            "Refusing to post an empty Steer snapshot so the last valid call list is preserved."
+        )
     response = HTTP.post(
         f"{config.dashboard_url}/api/opportunities",
         json={
@@ -799,6 +770,10 @@ def post_service_writers(config: Config, period: str, start_date, end_date, writ
 
 
 def post_job_board(config: Config, repair_orders: list[dict]) -> None:
+    if not repair_orders:
+        raise RuntimeError(
+            "Refusing to post an empty Job Board snapshot so the last valid board is preserved."
+        )
     response = HTTP.post(
         f"{config.dashboard_url}/api/job-board",
         json={
@@ -915,6 +890,9 @@ def get_warranty_overrides(config: Config) -> dict[str, str]:
 
 
 def post_goal_miss(config: Config, start_date, end_date, tickets: list[dict]) -> None:
+    if not tickets:
+        log("Goal Miss produced no tickets; leaving the last valid snapshot in place.")
+        return
     response = HTTP.post(
         f"{config.dashboard_url}/api/goal-miss",
         json={
@@ -1372,124 +1350,6 @@ def extract_goal_miss_tickets(context, config: Config, start_date, end_date) -> 
         return len(tickets)
     finally:
         page.close()
-
-
-def job_category(label: str) -> str:
-    normalized = label.lower()
-    groups = {
-        "attention": ("attn", "assist", "big daddy", "72hrs", "documentation"),
-        "authorization": ("authorization", "approval", "declined"),
-        "parts": ("part", "arrival", "sublet", "po#"),
-        "production": ("scheduled", "in-progress", "tech finished", "verify", "estimate"),
-        "completed": ("balance due", "credit due", "customer contacted", "ready to post", "payment link"),
-        "warranty": ("warranty", "3rdparty"),
-        "exception": ("abandonment", "labor lien", "no show", "need key", "do not touch"),
-    }
-    for category, tokens in groups.items():
-        if any(token in normalized for token in tokens):
-            return category
-    return "other"
-
-
-def parse_age_days(text: str) -> int:
-    match = re.search(r"Created\s+(\d+)\s*([mhdM])\s+ago", text)
-    if not match:
-        return 0
-    amount = int(match.group(1))
-    unit = match.group(2)
-    if unit == "M":
-        return amount * 30
-    if unit == "d":
-        return amount
-    return 0
-
-
-def parse_job_card(raw: dict) -> dict | None:
-    text = str(raw.get("text") or "")
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    ro_match = re.search(r"RO#(\d+)", text)
-    phone_match = re.search(r"\(\d{3}\)\s*\d{3}-\d{4}", text)
-    if not ro_match or not phone_match:
-        return None
-    created_line = next((line for line in lines if line.startswith("Created ")), "")
-    known_labels = {item.casefold(): item for item in JOB_BOARD_LABELS}
-    label = next(
-        (known_labels[line.casefold()] for line in lines if line.casefold() in known_labels),
-        "Unlabeled",
-    )
-    customer_line = next(
-        (line for line in lines if phone_match.group(0) in line),
-        "",
-    )
-    customer = re.sub(r"\(\d{3}\)\s*\d{3}-\d{4}", "", customer_line)
-    customer = customer.replace("•", "").strip()
-    phone_index = lines.index(customer_line) if customer_line in lines else -1
-    if not customer and phone_index > 0:
-        for candidate in reversed(lines[:phone_index]):
-            cleaned = candidate.replace("•", "").strip(" ·")
-            if (
-                not cleaned
-                or cleaned.casefold() in known_labels
-                or re.fullmatch(r"[A-Z]{1,3}", cleaned)
-                or re.fullmatch(r"RO#\d+", cleaned, re.IGNORECASE)
-                or cleaned.startswith("Created ")
-                or re.fullmatch(r"\d+\s*[mhdM]\s+ago(?:\s*-\s*Pending)?", cleaned)
-            ):
-                continue
-            if re.search(r"[A-Za-z]", cleaned):
-                customer = cleaned
-                break
-    vehicle = ""
-    for candidate in lines[phone_index + 1:] if phone_index >= 0 else []:
-        cleaned = candidate.replace("•", "").strip(" ·")
-        if re.match(r"^\d{4}\s+\S", cleaned):
-            vehicle = cleaned
-            break
-    initials = set(re.findall(r"(?<![A-Z])[A-Z]{2}(?![A-Z#])", text))
-    writer_initial = next(
-        (initial for initial in SERVICE_WRITER_PRIORITY if initial in initials),
-        "",
-    )
-    section = str(raw.get("section") or "unknown")
-    age_days = parse_age_days(text)
-    money_values = re.findall(r"\$[\d,]+(?:\.\d{2})?", text)
-    # Tekmetric has rendered this progress value both as ``0 / 2 hrs`` and
-    # simply ``0 / 2``.  The unit-free form is the current Job Board markup.
-    # Keep the numbers bounded so dates, phone numbers, and dollar amounts
-    # cannot be mistaken for labor progress.
-    hour_progress = re.findall(
-        r"(?<![\d.$])([0-9]{1,3}(?:\.[0-9]{1,2})?)\s*/\s*"
-        r"([0-9]{1,3}(?:\.[0-9]{1,2})?)(?:\s*(?:hrs?|hours?))?(?![\d/])",
-        text, re.I,
-    )
-    sold_hours = max((number(total) for _worked, total in hour_progress), default=0)
-    activity_ages = re.findall(r"(\d+)\s*([mhdM])\s+ago", text)
-    latest_activity_days = min(
-        (
-            int(value) * 30 if unit == "M" else int(value) if unit == "d" else 0
-            for value, unit in activity_ages
-        ),
-        default=age_days,
-    )
-    return {
-        "roNumber": ro_match.group(1),
-        "section": section,
-        "label": label,
-        "category": job_category(label),
-        "customer": customer,
-        "phone": phone_match.group(0),
-        "vehicle": vehicle,
-        "serviceWriter": SERVICE_WRITERS.get(writer_initial, "Unassigned"),
-        "serviceWriterInitials": writer_initial,
-        "assignedInitials": sorted(initials),
-        "ageDays": age_days,
-        "daysSinceActivity": latest_activity_days,
-        "amount": currency(money_values[-1]) if money_values else 0,
-        "soldHours": round(sold_hours, 2),
-        "balanceDue": "Balance Due" in text,
-        "rawText": text[:2000],
-        "detailUrl": str(raw.get("href") or ""),
-    }
 
 
 def extract_visible_job_cards(page: Page) -> list[dict]:
@@ -2715,17 +2575,6 @@ def sync_job_board(context, config: Config, run_ticket_audit: bool = False) -> i
         page.close()
 
 
-def classify_customer(name: str) -> str:
-    """Conservative first pass; uncertain records stay personal for review."""
-    business_terms = re.compile(
-        r"\b(LLC|INC|CORP|CO\.?|COMPANY|TOWING|ELECTRIC|PLUMBING|CONSTRUCTION|"
-        r"COUNTY|CITY OF|POLICE|SHERIFF|SCHOOL|CHURCH|FARMS?|SERVICES?|TRUCKING|"
-        r"LOGISTICS|LANDSCAPING|ROOFING|HVAC|ENTERPRISE|RENTAL)\b",
-        re.IGNORECASE,
-    )
-    return "business" if business_terms.search(name) else "personal"
-
-
 def extract_steer_page(page: Page) -> list[dict]:
     # Every opportunity row has one Call Guide button. Find the nearest
     # reasonably-sized ancestor for each button instead of depending on
@@ -2743,42 +2592,6 @@ def extract_steer_page(page: Page) -> list[dict]:
           return (row.innerText || "").trim();
         })"""
     )
-
-
-def parse_steer_row(text: str) -> dict | None:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if not lines:
-        return None
-    phone_match = re.search(r"\(\d{3}\)\s*\d{3}-\d{4}", text)
-    last_visit_match = re.search(r"Last Visit:\s*([^\n]+)", text, re.IGNORECASE)
-    heat = len(re.findall(r"🔥", text))
-    signals = [
-        line for line in lines
-        if any(token in line for token in ("Svc Due", "Last Appt", "Since Last Visit", "Maint. Svc"))
-    ]
-    ignored = re.compile(r"^(Call Guide|More \(\d+\)|Last Visit:|\(\d{3}\))", re.IGNORECASE)
-    content = [line for line in lines if not ignored.search(line) and "🔥" not in line]
-    if len(content) < 2:
-        return None
-    customer = content[0]
-    vehicle = content[1]
-    opportunity_key = hashlib.sha1(
-        f"{customer}|{vehicle}|{phone_match.group(0) if phone_match else ''}".encode("utf-8")
-    ).hexdigest()
-    return {
-        "key": opportunity_key,
-        "customer": customer,
-        "vehicle": vehicle,
-        "phone": phone_match.group(0) if phone_match else "",
-        "lastVisit": last_visit_match.group(1).strip() if last_visit_match else "",
-        "heat": heat,
-        "signals": signals[:6],
-        "recommendedServices": [
-            signal for signal in signals
-            if "svc" in signal.lower() or "service" in signal.lower()
-        ][:6],
-        "customerType": classify_customer(customer),
-    }
 
 
 def collect_steer_current_page(page: Page) -> list[dict]:
@@ -3006,8 +2819,34 @@ def sync_once(page: Page, config: Config) -> None:
     )
 
 
+def status_for_site(site: str) -> str:
+    lowered = (site or "").lower()
+    if lowered == "steer":
+        return "steer_signin_required"
+    if lowered == "napa":
+        return "napa_signin_required"
+    return "tekmetric_signin_required"
+
+
+def acquire_single_instance_lock() -> None:
+    ROOT.mkdir(parents=True, exist_ok=True)
+    if LOCK_PATH.exists():
+        try:
+            existing = int(LOCK_PATH.read_text(encoding="utf-8").strip() or "0")
+            os.kill(existing, 0)
+            raise RuntimeError(
+                f"Another reader is already running (pid {existing}). "
+                "Never share the same Chrome profile between two readers."
+            )
+        except (ValueError, OSError, ProcessLookupError):
+            pass
+    LOCK_PATH.write_text(str(os.getpid()), encoding="utf-8")
+
+
 def run(config: Config) -> None:
     ROOT.mkdir(parents=True, exist_ok=True)
+    acquire_single_instance_lock()
+    log(f"Delta Auto reader {READER_REVISION} starting")
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
             str(PROFILE_PATH),
@@ -3023,6 +2862,7 @@ def run(config: Config) -> None:
         last_full_report_sync: datetime | None = None
         while True:
             priority_cycle_started = time.monotonic()
+            cycle_attention = None
             try:
                 try:
                     if schedule_capture_requested(config):
@@ -3030,6 +2870,7 @@ def run(config: Config) -> None:
                         log(f"Manual schedule snapshot completed: {manual_count} appointments")
                 except NeedsSignInError as schedule_signin_exc:
                     log(f"Manual schedule snapshot needs sign-in: {schedule_signin_exc}")
+                    cycle_attention = (status_for_site(schedule_signin_exc.site), str(schedule_signin_exc))
                 except Exception as manual_schedule_exc:
                     log(f"Manual schedule snapshot failed: {manual_schedule_exc}")
                 report_due = (
@@ -3071,9 +2912,7 @@ def run(config: Config) -> None:
                             log(f"Schedule history sync failed: {schedule_exc}")
                 except NeedsSignInError as job_signin_exc:
                     log(f"Job Board sync needs sign-in: {job_signin_exc}")
-                    post_reader_status(
-                        config, "tekmetric_signin_required", str(job_signin_exc)
-                    )
+                    cycle_attention = (status_for_site(job_signin_exc.site), str(job_signin_exc))
                 except Exception as job_exc:
                     log(f"Job Board sync failed: {job_exc}")
                 if (
@@ -3087,6 +2926,7 @@ def run(config: Config) -> None:
                         log(f"Vehicle history background batch completed: {history_count} customers")
                     except NeedsSignInError as history_signin_exc:
                         log(f"Vehicle history needs sign-in: {history_signin_exc}")
+                        cycle_attention = (status_for_site(history_signin_exc.site), str(history_signin_exc))
                     except Exception as history_exc:
                         log(f"Vehicle history sync failed: {history_exc}")
                 if (
@@ -3099,23 +2939,22 @@ def run(config: Config) -> None:
                         log(f"Synced {count} Steer opportunities")
                     except NeedsSignInError as steer_signin_exc:
                         log(f"Steer sync needs sign-in: {steer_signin_exc}")
-                        post_reader_status(
-                            config, "steer_signin_required", str(steer_signin_exc)
-                        )
+                        cycle_attention = (status_for_site(steer_signin_exc.site), str(steer_signin_exc))
                     except Exception as steer_exc:
                         log(f"Steer sync failed: {steer_exc}")
-                # Everything above either succeeded or reported its own
-                # specific status. If we got this far, the reader itself is
-                # healthy — clear any stale "needs sign-in" banner.
-                post_reader_status(config, "ok", "Reader is syncing normally.")
+                if cycle_attention:
+                    post_reader_status(config, cycle_attention[0], cycle_attention[1])
+                else:
+                    post_reader_status(
+                        config,
+                        "ok",
+                        f"Reader {READER_REVISION} is syncing normally.",
+                    )
             except NeedsSignInError as signin_exc:
                 log(f"Sync needs sign-in: {signin_exc}")
-                status = (
-                    "steer_signin_required"
-                    if signin_exc.site.lower() == "steer"
-                    else "tekmetric_signin_required"
+                post_reader_status(
+                    config, status_for_site(signin_exc.site), str(signin_exc)
                 )
-                post_reader_status(config, status, str(signin_exc))
             except Exception as exc:
                 log(f"Sync failed: {exc}")
                 post_reader_status(config, "error", str(exc)[:500])
@@ -3135,3 +2974,9 @@ if __name__ == "__main__":
         run(selected)
     except KeyboardInterrupt:
         sys.exit(0)
+    finally:
+        try:
+            if LOCK_PATH.exists() and LOCK_PATH.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                LOCK_PATH.unlink()
+        except Exception:
+            pass

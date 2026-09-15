@@ -1,32 +1,11 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.batch([env.DB.prepare(`CREATE TABLE IF NOT EXISTS warranty_claims (
-    ro_number TEXT PRIMARY KEY,
-    claim_json TEXT NOT NULL,
-    source_hash TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'needs_review',
-    claim_number TEXT NOT NULL DEFAULT '',
-    payment_amount REAL NOT NULL DEFAULT 0,
-    review_note TEXT NOT NULL DEFAULT '',
-    captured_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`), env.DB.prepare(`CREATE TABLE IF NOT EXISTS warranty_claim_original_overrides (
-    ro_number TEXT PRIMARY KEY,
-    original_ro_number TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`)]);
-}
 
 export async function GET(request: Request) {
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const readerAuthorized = Boolean(env.READER_API_KEY) && request.headers.get("x-reader-key") === env.READER_API_KEY;
   if (readerAuthorized) {
     const selections = await env.DB.prepare(`SELECT ro_number, original_ro_number FROM warranty_claim_original_overrides`).all<Record<string, unknown>>();
@@ -59,7 +38,7 @@ export async function PATCH(request: Request) {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const body = await request.json() as {
     roNumber?: string;
     status?: string;
@@ -109,7 +88,7 @@ export async function POST(request: Request) {
   }
   const body = await request.json() as { claims?: Record<string, unknown>[]; capturedAt?: string };
   if (!Array.isArray(body.claims)) return Response.json({ error: "Invalid warranty payload" }, { status: 400 });
-  await initialize();
+  await ensureSchema(env.DB);
   const capturedAt = String(body.capturedAt || new Date().toISOString());
   let saved = 0;
   for (const raw of body.claims.slice(0, 100)) {

@@ -1,4 +1,7 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
+import { r2Bucket } from "@/app/lib/r2";
 
 // Lot Walk audits: video goes into R2, a DB row tracks status, and the
 // actual vehicle/plate analysis is done out-of-band (by Claude, when asked
@@ -7,33 +10,12 @@ import { requireApiUser } from "@/app/chatgpt-auth";
 // surface; app/api/lot-walk/[id]/video and .../result are the machine-key
 // endpoints the analysis process uses to fetch a video and report back.
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS lot_walk_audits (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      status TEXT NOT NULL DEFAULT 'uploaded',
-      video_key TEXT NOT NULL,
-      video_filename TEXT NOT NULL,
-      video_size INTEGER NOT NULL DEFAULT 0,
-      result_json TEXT,
-      error_detail TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `).run();
-}
 
 export async function GET() {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const rows = await env.DB.prepare(`
     SELECT id, status, video_filename, video_size, result_json, error_detail, created_at, updated_at
     FROM lot_walk_audits
@@ -61,9 +43,9 @@ export async function POST(request: Request) {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
 
-  const bucket = (env as Record<string, unknown>).delta_auto_lot_walks as
+  const bucket = r2Bucket(env as Record<string, unknown>) as
     | { put: (key: string, body: ReadableStream | null, opts?: Record<string, unknown>) => Promise<{ size?: number } | null> }
     | undefined;
   if (!bucket) {

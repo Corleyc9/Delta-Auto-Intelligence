@@ -1,4 +1,7 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { isEmptyCriticalSnapshot } from "@/app/lib/snapshot-guards";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 type Snapshot = {
   period: "weekly" | "daily" | "last_week";
@@ -17,31 +20,6 @@ type Snapshot = {
   capturedAt: string;
 };
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.batch([
-    env.DB.prepare(`
-      CREATE TABLE IF NOT EXISTS shop_snapshots (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        start_date TEXT NOT NULL,
-        end_date TEXT NOT NULL,
-        total_sales REAL NOT NULL,
-        gross_profit REAL NOT NULL,
-        labor_sales REAL NOT NULL,
-        technicians_json TEXT NOT NULL,
-        captured_at TEXT NOT NULL
-      )
-    `),
-    env.DB.prepare(
-      "CREATE INDEX IF NOT EXISTS shop_snapshots_captured_idx ON shop_snapshots(captured_at DESC)",
-    ),
-  ]);
-}
 
 function validFinancialNumber(value: unknown): value is number {
   // Credits, refunds and an unprofitable day can legitimately make Tekmetric
@@ -53,7 +31,7 @@ export async function GET(request: Request) {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const requested = new URL(request.url).searchParams.get("period");
   const requestedPeriod = requested === "daily"
     ? "daily"
@@ -134,6 +112,15 @@ export async function POST(request: Request) {
       item.name &&
       item.name.toLowerCase() !== "unassigned"
     );
+  if (isEmptyCriticalSnapshot({
+    technicians,
+    totalSales: Number(payload.totalSales) || 0,
+    totalROs: Number(payload.totalROs) || 0,
+  })) {
+    return Response.json({
+      error: "Empty shop snapshot rejected; last valid snapshot preserved.",
+    }, { status: 422 });
+  }
   const snapshotDetails = {
     period: payload.period === "daily"
       ? "daily"
@@ -149,7 +136,7 @@ export async function POST(request: Request) {
     clearedFromAR: Number(payload.clearedFromAR) || 0,
   };
 
-  await initialize();
+  await ensureSchema(env.DB);
   const capturedAt = payload.capturedAt || new Date().toISOString();
   await env.DB.prepare(`
     INSERT INTO shop_snapshots

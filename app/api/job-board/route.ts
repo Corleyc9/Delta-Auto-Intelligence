@@ -1,4 +1,7 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { isEmptyJobBoard } from "@/app/lib/snapshot-guards";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 type RepairOrder = {
   roNumber: string;
@@ -20,11 +23,6 @@ type RepairOrder = {
   detailUrl: string;
 };
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
 function reportingWeekKey(value: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit",
@@ -35,58 +33,12 @@ function reportingWeekKey(value: Date) {
   return localDate.toISOString().slice(0, 10);
 }
 
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.batch([env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS job_board_snapshots (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      repair_orders_json TEXT NOT NULL,
-      captured_at TEXT NOT NULL
-    )
-  `), env.DB.prepare(`CREATE TABLE IF NOT EXISTS ro_diagnosis_watch (
-      ro_number TEXT PRIMARY KEY,
-      needs_diag_present INTEGER NOT NULL DEFAULT 0,
-      last_label TEXT NOT NULL DEFAULT '',
-      last_seen_at TEXT NOT NULL
-    )`), env.DB.prepare(`CREATE TABLE IF NOT EXISTS ro_verification_cycles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ro_number TEXT NOT NULL,
-      customer TEXT NOT NULL,
-      vehicle TEXT NOT NULL,
-      service_writer TEXT NOT NULL,
-      detail_url TEXT NOT NULL DEFAULT '',
-      amount REAL NOT NULL DEFAULT 0,
-      section TEXT NOT NULL,
-      diagnosed_at TEXT NOT NULL,
-      verify_label_seen_at TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
-      verified_at TEXT,
-      verified_by TEXT,
-      verification_note TEXT NOT NULL DEFAULT '',
-      last_seen_at TEXT NOT NULL
-    )`), env.DB.prepare(`CREATE INDEX IF NOT EXISTS ro_verification_status_idx
-      ON ro_verification_cycles (status, diagnosed_at DESC)`), env.DB.prepare(`CREATE TABLE IF NOT EXISTS ro_sold_hours_watch (
-      ro_number TEXT PRIMARY KEY, sold_hours REAL NOT NULL DEFAULT 0, last_seen_at TEXT NOT NULL
-    )`), env.DB.prepare(`CREATE TABLE IF NOT EXISTS ro_sold_hours_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, ro_number TEXT NOT NULL,
-      customer TEXT NOT NULL DEFAULT '', vehicle TEXT NOT NULL DEFAULT '',
-      hours_delta REAL NOT NULL, week_key TEXT NOT NULL, captured_at TEXT NOT NULL
-    )`), env.DB.prepare(`CREATE INDEX IF NOT EXISTS ro_sold_hours_events_week_idx
-      ON ro_sold_hours_events (week_key, captured_at DESC)`), env.DB.prepare(`CREATE TABLE IF NOT EXISTS ro_sold_hours_watch_v2 (
-      ro_number TEXT PRIMARY KEY, sold_hours REAL NOT NULL DEFAULT 0, last_seen_at TEXT NOT NULL
-    )`), env.DB.prepare(`CREATE TABLE IF NOT EXISTS ro_sold_hours_events_v2 (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, ro_number TEXT NOT NULL,
-      customer TEXT NOT NULL DEFAULT '', vehicle TEXT NOT NULL DEFAULT '',
-      hours_delta REAL NOT NULL, week_key TEXT NOT NULL, captured_at TEXT NOT NULL
-    )`), env.DB.prepare(`CREATE INDEX IF NOT EXISTS ro_sold_hours_events_v2_week_idx
-      ON ro_sold_hours_events_v2 (week_key, captured_at DESC)`)]);
-}
 
 export async function GET() {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const row = await env.DB.prepare(`
     SELECT repair_orders_json, captured_at FROM job_board_snapshots
     WHERE repair_orders_json <> '[]'
@@ -141,13 +93,13 @@ export async function POST(request: Request) {
     detailUrl: String(item.detailUrl || "").slice(0, 1000),
   })).filter((item) => item.roNumber && item.customer);
 
-  if (!repairOrders.length) {
+  if (isEmptyJobBoard(repairOrders)) {
     return Response.json({
       error: "Empty Job Board snapshot rejected; last valid snapshot preserved.",
     }, { status: 422 });
   }
 
-  await initialize();
+  await ensureSchema(env.DB);
   const capturedAt = body.capturedAt || new Date().toISOString();
   const watchRows = await env.DB.prepare(`
     SELECT ro_number, needs_diag_present FROM ro_diagnosis_watch

@@ -1,4 +1,6 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 type ReviewItem = { status?: string; text?: string };
 type SubmittedEstimate = {
@@ -7,11 +9,6 @@ type SubmittedEstimate = {
 };
 
 const AUDIT_RULES_VERSION = "2026-08-24-labor-rates-v2";
-
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
 
 function fromBase64(value: string): ArrayBuffer {
   const binary = atob(value);
@@ -31,22 +28,6 @@ async function decryptApiKey(env: any): Promise<string | null> {
   return new TextDecoder().decode(decrypted);
 }
 
-async function initialize(env: any) {
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS delta_ai_audits (
-      ro_number TEXT PRIMARY KEY,
-      customer TEXT NOT NULL DEFAULT '', vehicle TEXT NOT NULL DEFAULT '',
-      service_writer TEXT NOT NULL DEFAULT '', detail_url TEXT NOT NULL DEFAULT '',
-      source_hash TEXT NOT NULL, conclusion TEXT NOT NULL, summary TEXT NOT NULL,
-      review_json TEXT NOT NULL, captured_at TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
-    )`),
-    env.DB.prepare(`CREATE INDEX IF NOT EXISTS delta_ai_audits_active_idx
-      ON delta_ai_audits (active DESC, captured_at DESC)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS delta_ai_cleared (
-      ro_number TEXT PRIMARY KEY, source_hash TEXT NOT NULL, cleared_at TEXT NOT NULL
-    )`),
-  ]);
-}
 
 function outputText(payload: any): string {
   if (typeof payload.output_text === "string") return payload.output_text;
@@ -163,7 +144,7 @@ export async function GET() {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize(env);
+  await ensureSchema(env.DB);
   const rows = await env.DB.prepare(`SELECT * FROM delta_ai_audits
     WHERE active = 1 ORDER BY captured_at DESC LIMIT 100`).all<Record<string, unknown>>();
   return Response.json({ audits: rows.results.map((row) => ({
@@ -178,7 +159,7 @@ export async function DELETE(request: Request) {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize(env);
+  await ensureSchema(env.DB);
   const roNumber = new URL(request.url).searchParams.get("roNumber")?.replace(/\D/g, "") || "";
   if (!roNumber) return Response.json({ error: "A repair order number is required." }, { status: 400 });
   const clearedAt = new Date().toISOString();
@@ -197,7 +178,7 @@ export async function POST(request: Request) {
   if (!env.READER_API_KEY || request.headers.get("x-reader-key") !== env.READER_API_KEY) {
     return Response.json({ error: "Unauthorized reader" }, { status: 401 });
   }
-  await initialize(env);
+  await ensureSchema(env.DB);
   const body = await request.json() as { estimates?: SubmittedEstimate[]; activeRoNumbers?: string[] };
   const estimates = Array.isArray(body.estimates) ? body.estimates.slice(0, 25) : [];
   const active = (Array.isArray(body.activeRoNumbers) ? body.activeRoNumbers : [])

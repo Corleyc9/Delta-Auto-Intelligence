@@ -1,33 +1,13 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS tekmetric_customer_history (
-      customer_key TEXT PRIMARY KEY, customer_name TEXT NOT NULL,
-      customer_url TEXT NOT NULL, vehicles_json TEXT NOT NULL DEFAULT '[]',
-      updated_at TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS tekmetric_paid_ro_history (
-      ro_number TEXT PRIMARY KEY, customer_key TEXT NOT NULL,
-      customer_name TEXT NOT NULL, vehicle TEXT NOT NULL DEFAULT '',
-      ro_url TEXT NOT NULL DEFAULT '', posted_date TEXT NOT NULL DEFAULT '',
-      odometer_out TEXT NOT NULL DEFAULT '', total REAL NOT NULL DEFAULT 0,
-      detail_json TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE INDEX IF NOT EXISTS tekmetric_paid_ro_customer_idx
-      ON tekmetric_paid_ro_history(customer_key, posted_date DESC)`),
-  ]);
-}
 
 export async function GET(request: Request) {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const key = new URL(request.url).searchParams.get("customerKey");
   if (key) {
     const customer = await env.DB.prepare(`SELECT * FROM tekmetric_customer_history WHERE customer_key=?`).bind(key).first();
@@ -51,7 +31,7 @@ export async function POST(request: Request) {
   const vehicles = Array.isArray(body.vehicles) ? body.vehicles.slice(0,200) : [];
   const ros = Array.isArray(body.repairOrders) ? body.repairOrders.slice(0,1000) as Record<string,unknown>[] : [];
   if (!customerKey || !customerName) return Response.json({error:"Customer identity is required"},{status:400});
-  await initialize();
+  await ensureSchema(env.DB);
   const updatedAt = new Date().toISOString();
   await env.DB.prepare(`INSERT INTO tekmetric_customer_history
     (customer_key,customer_name,customer_url,vehicles_json,updated_at) VALUES(?,?,?,?,?)

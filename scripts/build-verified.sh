@@ -18,6 +18,9 @@ if [[ ! -x "${vinext}" ]]; then
   exit 69
 fi
 
+echo "Packing the Windows reader ZIP from current reader sources..."
+"${script_dir}/pack-reader.sh"
+
 echo "Running bounded vinext build..."
 timeout \
   --signal=TERM \

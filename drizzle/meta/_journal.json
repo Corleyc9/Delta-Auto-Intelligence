@@ -8,6 +8,13 @@
       "when": 1787146265354,
       "tag": "0000_gorgeous_namor",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1757945400000,
+      "tag": "0001_consolidate_tables",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,7 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
+import { r2Bucket } from "@/app/lib/r2";
 
 type UploadedPart = { partNumber: number; etag: string };
 type MultipartUpload = {
@@ -11,28 +14,9 @@ type LotWalkBucket = {
   resumeMultipartUpload: (key: string, uploadId: string) => MultipartUpload;
 };
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS lot_walk_audits (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    status TEXT NOT NULL DEFAULT 'uploaded',
-    video_key TEXT NOT NULL,
-    video_filename TEXT NOT NULL,
-    video_size INTEGER NOT NULL DEFAULT 0,
-    result_json TEXT,
-    error_detail TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`).run();
-}
 
 function bucketFrom(env: Record<string, unknown>) {
-  return env.delta_auto_lot_walks as LotWalkBucket | undefined;
+  return r2Bucket(env as Record<string, unknown>) as LotWalkBucket | undefined;
 }
 
 export async function POST(request: Request) {
@@ -65,7 +49,7 @@ export async function POST(request: Request) {
     }).filter((part) => Number.isInteger(part.partNumber) && part.partNumber > 0 && part.etag);
     if (!key || !uploadId || !parts.length) return Response.json({ error: "Incomplete upload information" }, { status: 400 });
     const completed = await bucket.resumeMultipartUpload(key, uploadId).complete(parts);
-    await initialize();
+    await ensureSchema(env.DB);
     const now = new Date().toISOString();
     const result = await env.DB.prepare(`INSERT INTO lot_walk_audits
       (status, video_key, video_filename, video_size, created_at, updated_at)

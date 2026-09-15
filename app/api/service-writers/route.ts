@@ -1,29 +1,13 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS service_writer_snapshots (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      period TEXT NOT NULL,
-      start_date TEXT NOT NULL,
-      end_date TEXT NOT NULL,
-      writers_json TEXT NOT NULL,
-      captured_at TEXT NOT NULL
-    )
-  `).run();
-}
 
 export async function GET(request: Request) {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const requested = new URL(request.url).searchParams.get("period");
   const period = requested === "daily" ? "daily" : requested === "last_week" ? "last_week" : "weekly";
   const row = await env.DB.prepare(`
@@ -47,7 +31,7 @@ export async function POST(request: Request) {
   if (!body.startDate || !body.endDate || !Array.isArray(body.writers)) {
     return Response.json({ error: "Invalid writer payload" }, { status: 400 });
   }
-  await initialize();
+  await ensureSchema(env.DB);
   const capturedAt = String(body.capturedAt || new Date().toISOString());
   await env.DB.prepare(`
     INSERT INTO service_writer_snapshots

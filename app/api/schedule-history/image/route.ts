@@ -1,26 +1,8 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
+import { r2Bucket } from "@/app/lib/r2";
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize(env: Awaited<ReturnType<typeof runtimeEnv>>) {
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS schedule_snapshot_images (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    schedule_date TEXT NOT NULL,
-    hour_key TEXT NOT NULL,
-    object_key TEXT NOT NULL,
-    captured_at TEXT NOT NULL,
-    UNIQUE(schedule_date, hour_key)
-  )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS schedule_capture_request (
-      id INTEGER PRIMARY KEY CHECK (id = 1), status TEXT NOT NULL,
-      requested_at TEXT NOT NULL, completed_at TEXT
-    )`),
-  ]);
-}
 
 export async function POST(request: Request) {
   const env = await runtimeEnv();
@@ -33,7 +15,7 @@ export async function POST(request: Request) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduleDate) || !/^\d{2}(?:\d{2})?$/.test(hourKey)) {
     return Response.json({ error: "Invalid schedule screenshot key" }, { status: 400 });
   }
-  const bucket = (env as Record<string, unknown>).delta_auto_lot_walks as
+  const bucket = r2Bucket(env as Record<string, unknown>) as
     | { put: (key: string, value: ArrayBuffer, options?: unknown) => Promise<unknown> }
     | undefined;
   if (!bucket) return Response.json({ error: "Screenshot storage is not configured" }, { status: 503 });
@@ -41,7 +23,7 @@ export async function POST(request: Request) {
   if (!bytes.byteLength || bytes.byteLength > 15_000_000) {
     return Response.json({ error: "Invalid screenshot" }, { status: 400 });
   }
-  await initialize(env);
+  await ensureSchema(env.DB);
   const capturedAt = new Date().toISOString();
   const objectKey = `schedule-history/${scheduleDate}/${hourKey}-${Date.now()}.png`;
   await bucket.put(objectKey, bytes, { httpMetadata: { contentType: "image/png" } });
@@ -60,14 +42,14 @@ export async function GET(request: Request) {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize(env);
+  await ensureSchema(env.DB);
   const url = new URL(request.url);
   const row = await env.DB.prepare(`SELECT object_key FROM schedule_snapshot_images
     WHERE schedule_date = ? AND hour_key = ?`)
     .bind(url.searchParams.get("date") || "", url.searchParams.get("hour") || "")
     .first<Record<string, unknown>>();
   if (!row) return Response.json({ error: "Screenshot not found" }, { status: 404 });
-  const bucket = (env as Record<string, unknown>).delta_auto_lot_walks as
+  const bucket = r2Bucket(env as Record<string, unknown>) as
     | { get: (key: string) => Promise<{ body: ReadableStream } | null> }
     | undefined;
   const object = bucket ? await bucket.get(String(row.object_key)) : null;

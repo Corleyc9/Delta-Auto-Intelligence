@@ -1,4 +1,6 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 type Finding = {
   code: string;
@@ -8,36 +10,12 @@ type Finding = {
   estimatedImpact: number;
 };
 
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
-
-async function initialize() {
-  const env = await runtimeEnv();
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS ticket_audit_snapshots (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      report_date TEXT NOT NULL,
-      audits_json TEXT NOT NULL,
-      captured_at TEXT NOT NULL
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS ticket_audit_dispositions (
-      ro_number TEXT PRIMARY KEY,
-      status TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      hide_until TEXT,
-      updated_by TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`),
-  ]);
-}
 
 export async function GET() {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const row = await env.DB.prepare(`
     SELECT report_date, audits_json, captured_at FROM ticket_audit_snapshots
     ORDER BY captured_at DESC, id DESC LIMIT 1
@@ -69,7 +47,7 @@ export async function PATCH(request: Request) {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await initialize();
+  await ensureSchema(env.DB);
   const body = await request.json() as {
     roNumber?: string;
     status?: "approved" | "hidden" | "open";
@@ -137,7 +115,7 @@ export async function POST(request: Request) {
       };
     }) : [],
   })).filter((audit) => audit.roNumber);
-  await initialize();
+  await ensureSchema(env.DB);
   const capturedAt = body.capturedAt || new Date().toISOString();
   await env.DB.prepare(`
     INSERT INTO ticket_audit_snapshots (report_date, audits_json, captured_at)

@@ -1,12 +1,10 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
+import { r2Bucket } from "@/app/lib/r2";
 
 // The Windows reader may use its machine key. A signed-in dashboard user may
 // also retrieve a video they can already see in the protected Lot Walk page.
-
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
 
 export async function GET(
   request: Request,
@@ -22,12 +20,13 @@ export async function GET(
   }
 
   const { id } = await params;
+  await ensureSchema(env.DB);
   const row = await env.DB.prepare(
     "SELECT video_key, video_filename FROM lot_walk_audits WHERE id = ?",
   ).bind(id).first<Record<string, unknown>>();
   if (!row) return Response.json({ error: "Not found" }, { status: 404 });
 
-  const bucket = (env as Record<string, unknown>).delta_auto_lot_walks as
+  const bucket = r2Bucket(env as Record<string, unknown>) as
     | { get: (key: string) => Promise<{ body: ReadableStream; httpMetadata?: { contentType?: string } } | null> }
     | undefined;
   if (!bucket) {

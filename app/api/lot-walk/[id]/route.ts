@@ -1,9 +1,6 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
-
-async function runtimeEnv() {
-  const { env } = await import("cloudflare:workers");
-  return env;
-}
+import { ensureSchema } from "@/db/ensure-schema";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 export async function GET(
   _request: Request,
@@ -13,6 +10,7 @@ export async function GET(
   if (auth instanceof Response) return auth;
   const { id } = await params;
   const env = await runtimeEnv();
+  await ensureSchema(env.DB);
 
   const row = await env.DB.prepare(`
     SELECT id, status, video_filename, video_size, result_json, error_detail, created_at, updated_at
