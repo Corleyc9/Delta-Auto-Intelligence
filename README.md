@@ -76,14 +76,16 @@ When Tekmetric, Steer, or NAPA needs a human sign-in, the loop reports **Needs A
 
 Payroll tables, technician targets, GP formulas, and API payload shapes are unchanged from the companion source.
 
-## Production cutover (not done here)
+## Production cutover for `deltaintelligence.cc` (not done in this repo)
 
-Pointing `deltaintelligence.cc` and the shop PC at this build is a separate, explicit step:
+The shop owns `deltaintelligence.cc`. Merging this PR does not change DNS or the live Worker.
 
-1. Create or attach a Cloudflare Worker with D1 `DB` and R2 `BUCKET` (migrate existing data; do not drop live tables).
-2. Set the secret names above on that Worker.
-3. Deploy this build when the owner approves.
-4. Install the new reader ZIP on the shop PC and confirm the hash matches the dashboard.
-5. Sign into Tekmetric/Steer/NAPA manually in the persistent profile and watch one Today / this week / last week cycle.
+1. Keep the existing D1 database and R2 bucket. Bind them as `DB` and `BUCKET`. Do not drop live tables; `ensureSchema` only adds missing tables/columns.
+2. Set Worker secrets by name (values stay in Cloudflare, never in git):
+   `DASHBOARD_PASSWORD`, `DASHBOARD_SESSION_SECRET`, `PAYROLL_PASSWORD`, `PAYROLL_SESSION_SECRET`, `READER_API_KEY`, `SITES_MACHINE_TOKEN`, `AI_ENCRYPTION_KEY`.
+   Example: `npx wrangler secret put DASHBOARD_PASSWORD` (repeat for each name).
+3. Deploy this build to the Worker that already serves `deltaintelligence.cc` (or attach the custom domain after deploy). Confirm the dashboard login still uses user `delta`.
+4. On the shop PC, download the new reader ZIP from the live dashboard. The hash next to Download must match **Reader build**. Run `install-reader.ps1`, then `register-scheduled-task.ps1` as the interactive Windows user.
+5. Sign into Tekmetric, Steer, and NAPA yourself in the visible Chrome profile. Confirm one Today, current Wednesday–Tuesday week, and last week cycle, and that Job Board does not go empty.
 
 Do not claim this repository has already updated production.
