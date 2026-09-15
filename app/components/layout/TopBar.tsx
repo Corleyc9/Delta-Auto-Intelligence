@@ -1,5 +1,6 @@
 "use client";
 
+import BrandLogo from "@/app/components/BrandLogo";
 import type { Range } from "@/app/lib/types";
 
 export default function TopBar({
@@ -19,9 +20,12 @@ export default function TopBar({
 }) {
   return (
     <header className="topbar">
-      <div>
-        <p className="eyebrow">DELTA AUTO &amp; TOWING · CANTON, MS</p>
-        <h1>Delta Auto Intelligence</h1>
+      <div className="topbar-brand">
+        <BrandLogo variant="header" />
+        <div>
+          <p className="eyebrow">DELTA AUTO &amp; TOWING · CANTON, MS</p>
+          <h1>Delta Auto Intelligence</h1>
+        </div>
       </div>
       <div className="topbar-actions">
         <button className="status-pill" onClick={onOpenReader}>
