@@ -1,4 +1,5 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { handleApi, readJson } from "@/app/lib/api-errors";
 import { isEmptyCriticalSnapshot } from "@/app/lib/snapshot-guards";
 import { ensureSchema } from "@/db/ensure-schema";
 import { runtimeEnv } from "@/app/lib/runtime";
@@ -28,6 +29,7 @@ function validFinancialNumber(value: unknown): value is number {
 }
 
 export async function GET(request: Request) {
+  return handleApi("snapshot", async () => {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
@@ -68,9 +70,11 @@ export async function GET(request: Request) {
       capturedAt: row.captured_at,
     },
   });
+  });
 }
 
 export async function POST(request: Request) {
+  return handleApi("snapshot", async () => {
   const env = await runtimeEnv();
   const expected = env.READER_API_KEY;
   const supplied = request.headers.get("x-reader-key");
@@ -78,7 +82,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unauthorized reader" }, { status: 401 });
   }
 
-  const payload = (await request.json()) as Partial<Snapshot>;
+  const payload = await readJson<Partial<Snapshot>>(request);
   if (
     !payload.startDate ||
     !payload.endDate ||
@@ -153,4 +157,5 @@ export async function POST(request: Request) {
   ).run();
 
   return Response.json({ ok: true, capturedAt }, { status: 201 });
+  });
 }

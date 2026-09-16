@@ -1,10 +1,12 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { handleApi } from "@/app/lib/api-errors";
 import { ensureSchema } from "@/db/ensure-schema";
 import { runtimeEnv } from "@/app/lib/runtime";
 import { r2Bucket } from "@/app/lib/r2";
 
 
 export async function POST(request: Request) {
+  return handleApi("schedule-history-image", async () => {
   const env = await runtimeEnv();
   if (!env.READER_API_KEY || request.headers.get("x-reader-key") !== env.READER_API_KEY) {
     return Response.json({ error: "Unauthorized reader" }, { status: 401 });
@@ -36,9 +38,11 @@ export async function POST(request: Request) {
     SET status = 'completed', completed_at = ? WHERE id = 1 AND status = 'pending'`)
     .bind(capturedAt).run();
   return Response.json({ ok: true, capturedAt }, { status: 201 });
+  });
 }
 
 export async function GET(request: Request) {
+  return handleApi("schedule-history-image", async () => {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
@@ -55,4 +59,5 @@ export async function GET(request: Request) {
   const object = bucket ? await bucket.get(String(row.object_key)) : null;
   if (!object) return Response.json({ error: "Screenshot missing from storage" }, { status: 404 });
   return new Response(object.body, { headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store" } });
+  });
 }

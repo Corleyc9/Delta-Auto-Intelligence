@@ -1,4 +1,5 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { handleApi, readJson } from "@/app/lib/api-errors";
 import { ensureSchema } from "@/db/ensure-schema";
 import { runtimeEnv } from "@/app/lib/runtime";
 
@@ -12,6 +13,7 @@ type ScheduleAppointment = {
 
 
 export async function GET(request: Request) {
+  return handleApi("schedule-history", async () => {
   const env = await runtimeEnv();
   const machineAuthorized = Boolean(
     env.READER_API_KEY && request.headers.get("x-reader-key") === env.READER_API_KEY,
@@ -49,9 +51,11 @@ export async function GET(request: Request) {
       screenshotAvailable: Boolean(row.screenshot_available),
     })),
   });
+  });
 }
 
 export async function POST(request: Request) {
+  return handleApi("schedule-history", async () => {
   const env = await runtimeEnv();
   const machineAuthorized = Boolean(
     env.READER_API_KEY && request.headers.get("x-reader-key") === env.READER_API_KEY,
@@ -60,7 +64,7 @@ export async function POST(request: Request) {
   if (!machineAuthorized) {
     const auth = await requireApiUser();
     if (auth instanceof Response) return auth;
-    const actionBody = await request.json() as { action?: string };
+    const actionBody = await readJson<{ action?: string }>(request);
     if (actionBody.action !== "request-capture") {
       return Response.json({ error: "Unsupported action" }, { status: 400 });
     }
@@ -71,7 +75,7 @@ export async function POST(request: Request) {
       .bind(requestedAt).run();
     return Response.json({ ok: true, requestedAt }, { status: 202 });
   }
-  const body = await request.json() as {
+  const body = await readJson<{
     scheduleDate?: string;
     hourKey?: string;
     hourLabel?: string;
@@ -79,7 +83,7 @@ export async function POST(request: Request) {
     appointments?: ScheduleAppointment[];
     rawText?: string;
     capturedAt?: string;
-  };
+  }>(request);
   const scheduleDate = String(body.scheduleDate || "");
   const hourKey = String(body.hourKey || "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduleDate) || !/^\d{2}(?:\d{2})?$/.test(hourKey)) {
@@ -115,4 +119,5 @@ export async function POST(request: Request) {
     WHERE schedule_date < date('now', '-30 days')`).run();
 
   return Response.json({ ok: true, count: appointments.length, capturedAt }, { status: 201 });
+  });
 }
