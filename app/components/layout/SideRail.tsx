@@ -9,8 +9,8 @@ export const PRIMARY_NAV: Array<[string, string]> = [
 ];
 
 export const MORE_NAV: Array<[string, string, string]> = [
-  ["Goal Miss", "GP", "shop"],
-  ["Ticket Auditor", "WIP", "shop"],
+  ["Goal Miss", "Goal Miss", "shop"],
+  ["Ticket Auditor", "WIP Audit", "shop"],
   ["Warranty Claims", "Warranty", "shop"],
   ["Delta AI Review", "AI Review", "shop"],
   ["Leads", "Leads", "front"],

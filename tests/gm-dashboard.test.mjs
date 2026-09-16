@@ -30,6 +30,7 @@ test("primary nav keeps Overview Verify Board; extra screens sit under More", as
   assert.match(source, /export const MORE_NAV/);
   assert.match(source, /Lot Walk/);
   assert.match(source, /Goal Miss/);
+  assert.match(source, /\["Goal Miss", "Goal Miss"/);
   assert.match(source, /aria-label="More"/);
 });
 
