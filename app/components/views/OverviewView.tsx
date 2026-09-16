@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useDashboard } from "@/app/dashboard-context";
 import Icon from "../Icon";
 import { money, relativeTime } from "@/app/lib/format";
@@ -16,6 +17,7 @@ export default function OverviewView() {
     aiLoading,
     setAiSetupOpen,
     setNav,
+    setConnectionOpen,
     soldHoursThisWeek,
     jobBoardCapturedAt,
     selectedLive,
@@ -28,9 +30,7 @@ export default function OverviewView() {
     roCount,
     calculatedAro,
     hoursPerRO,
-    weeklySalesGoal,
     weeklyHoursSoldGoal,
-    weeklyCarGoal,
     isToday,
     showsOperatingGoal,
     currentSalesGoal,
@@ -57,9 +57,94 @@ export default function OverviewView() {
     askAI,
     usePrompt,
     webhookEvents,
+    readerStatus,
+    criticalJobs,
+    warningJobs,
+    auditCritical,
+    goalTickets,
+    hiddenGoalTicket,
+    weeklySalesGoal,
+    weeklyCarGoal,
   } = useDashboard();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const needsAttention = Boolean(readerStatus && readerStatus.status !== "ok");
+  const attentionLabel =
+    readerStatus?.status === "tekmetric_signin_required" ? "Tekmetric sign-in"
+      : readerStatus?.status === "steer_signin_required" ? "Steer sign-in"
+        : readerStatus?.status === "napa_signin_required" ? "NAPA sign-in"
+          : needsAttention ? "Reader attention" : "Reader OK";
+  const gpFlagCount = (goalTickets || []).filter(
+    (ticket: { controllable?: boolean; roNumber: string }) =>
+      ticket.controllable && !(hiddenGoalTicket?.(ticket.roNumber)),
+  ).length;
+  const problemCount = Number(criticalJobs || 0) + Number(warningJobs || 0) + Number(auditCritical || 0);
+  const gpOffTarget = gpPercent < 60;
+
   return (
     <>
+        <section className="action-board" aria-label="GM action board">
+          <article
+            className={`action-card ${needsAttention ? "action-alert" : "action-ok"}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => setConnectionOpen(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") setConnectionOpen(true);
+            }}
+          >
+            <p>Needs Attention</p>
+            <strong>{needsAttention ? "Act now" : "Clear"}</strong>
+            <small>{needsAttention ? `${attentionLabel}. Sign in on the shop PC.` : "Tekmetric / Steer / NAPA sessions look fine."}</small>
+          </article>
+          <article
+            className={`action-card ${verifyQueue.length ? "action-alert" : "action-ok"}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => setNav("Verify Queue")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") setNav("Verify Queue");
+            }}
+          >
+            <p>Verify</p>
+            <strong>{verifyQueue.length}</strong>
+            <small>{verifyQueue.length ? "Open Verify Queue" : "All caught up"} · Estimates + WIP</small>
+          </article>
+          <article
+            className={`action-card ${problemCount ? "action-alert" : "action-ok"}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => setNav(Number(criticalJobs || 0) || Number(warningJobs || 0) ? "Job Board" : "Ticket Auditor")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                setNav(Number(criticalJobs || 0) || Number(warningJobs || 0) ? "Job Board" : "Ticket Auditor");
+              }
+            }}
+          >
+            <p>Problems</p>
+            <strong>{problemCount}</strong>
+            <small>
+              {Number(criticalJobs || 0)} WIP 7+ days · {Number(warningJobs || 0)} WIP 2+ days
+              {Number(auditCritical || 0) ? ` · ${auditCritical} critical GP findings` : ""}
+            </small>
+          </article>
+          <article
+            className={`action-card ${gpOffTarget || gpFlagCount ? "action-alert" : "action-ok"}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => setNav("Goal Miss")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") setNav("Goal Miss");
+            }}
+          >
+            <p>GP flags</p>
+            <strong>{gpPercent.toFixed(1)}%</strong>
+            <small>
+              {gpStatus.label}
+              {gpFlagCount ? ` · ${gpFlagCount} controllable ticket${gpFlagCount === 1 ? "" : "s"}` : " · Open Goal Miss for ticket detail"}
+            </small>
+          </article>
+        </section>
+
         <section className="operations-strip" aria-label={`${range} operating metrics`}>
           <article className="team-hours-summary">
             <div>
@@ -87,66 +172,14 @@ export default function OverviewView() {
           </article>
         </section>
 
-        <section className="kpi-grid" aria-label="Shop performance summary">
+        <section className="kpi-grid pace-grid" aria-label="Shop pace">
           <article className={`kpi-card ${showsOperatingGoal ? `gp-card ${data.sales >= currentSalesGoal ? "gp-target" : "gp-critical"}` : ""}`}>
             <Icon>◇</Icon>
             <div><p>Total Sales</p><strong>{money.format(data.sales)}</strong><small className={showsOperatingGoal ? "" : "positive"}>{showsOperatingGoal ? (data.sales >= currentSalesGoal ? `● ${money.format(currentSalesGoal)} ${isToday ? "daily pace" : "weekly goal"} achieved` : `● ${money.format(salesGoalGap)} below ${money.format(currentSalesGoal)} ${isToday ? "daily pace" : "goal"}`) : `↑ ${data.salesChange}%`} <em>{showsOperatingGoal && weeklySalesPace ? `${money.format(weeklySalesPace)} projected weekly` : data.comparison}</em></small></div>
           </article>
-          <article className="kpi-card">
-            <Icon>↗</Icon>
-            <div><p>Gross Profit</p><strong>{money.format(data.grossProfit)}</strong>
-              {selectedLive ? (
-                realChange && realChange.grossProfit !== null ? (
-                  <small className={realChange.grossProfit >= 0 ? "positive" : "negative"}>
-                    {realChange.grossProfit >= 0 ? "↑" : "↓"} {Math.abs(realChange.grossProfit).toFixed(1)}% <em>{realChange.label}</em>
-                  </small>
-                ) : (
-                  <small><em>{range === "Today" ? "today" : "no prior-week data yet"}</em></small>
-                )
-              ) : (
-                <small className="positive">↑ {data.gpChange}% <em>{data.comparison}</em></small>
-              )}
-            </div>
-          </article>
           <article className={`kpi-card gp-card ${gpStatus.className}`}>
             <Icon>%</Icon>
             <div><p>GP %</p><strong>{gpPercent.toFixed(1)}%</strong><small>{gpStatus.label} <em>calculated</em></small></div>
-          </article>
-          <article className="kpi-card">
-            <Icon>⌕</Icon>
-            <div><p>Labor Sales</p><strong>{money.format(data.laborSales)}</strong>
-              {selectedLive ? (
-                realChange && realChange.laborSales !== null ? (
-                  <small className={realChange.laborSales >= 0 ? "positive" : "negative"}>
-                    {realChange.laborSales >= 0 ? "↑" : "↓"} {Math.abs(realChange.laborSales).toFixed(1)}% <em>{realChange.label}</em>
-                  </small>
-                ) : (
-                  <small><em>{range === "Today" ? "today" : "no prior-week data yet"}</em></small>
-                )
-              ) : (
-                <small className="positive">↑ {data.laborChange}% <em>{data.comparison}</em></small>
-              )}
-            </div>
-          </article>
-          <article className="kpi-card">
-            <Icon>−</Icon>
-            <div><p>Less AR</p><strong>{selectedLive ? money.format(selectedLive.lessAR || 0) : "—"}</strong><small><em>Posted to A/R</em></small></div>
-          </article>
-          <article className="kpi-card">
-            <Icon>✓</Icon>
-            <div><p>Cleared from AR</p><strong>{selectedLive ? money.format(selectedLive.clearedFromAR || 0) : "—"}</strong><small><em>End of Day report</em></small></div>
-          </article>
-          <article
-            className={`kpi-card verify-kpi ${verifyQueue.length ? "has-items" : ""}`}
-            role="button"
-            tabIndex={0}
-            onClick={() => setNav("Verify Queue")}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") setNav("Verify Queue");
-            }}
-          >
-            <Icon>!</Icon>
-            <div><p>Needs Verification</p><strong>{verifyQueue.length}</strong><small>{verifyQueue.length ? "Open Verify Queue" : "All caught up"} <em>Estimates + WIP</em></small></div>
           </article>
           <article className={`kpi-card gp-card ${jobBoardCapturedAt ? (soldHoursThisWeek >= weeklyHoursSoldGoal ? "gp-target" : "gp-critical") : ""}`}>
             <Icon>◷</Icon>
@@ -156,34 +189,6 @@ export default function OverviewView() {
             </div>
           </article>
         </section>
-
-        {webhookEvents?.lastEventAt && (
-          <section className="webhook-live-panel" aria-label="Live Tekmetric webhook signals">
-            <div className="recovery-heading">
-              <div>
-                <p className="panel-kicker">CUSTOM INTEGRATION</p>
-                <h2>Live Tekmetric Events</h2>
-              </div>
-              <span>Webhooks do not replace the shop PC reader</span>
-            </div>
-            <div className="webhook-live-grid">
-              {([
-                ["Posted / Complete / A/R / Payment", webhookEvents.signals.overviewFreshness],
-                ["Work approved", webhookEvents.signals.lastApproval],
-                ["Work declined", webhookEvents.signals.lastDecline],
-                ["Schedule", webhookEvents.signals.scheduleChanged],
-                ["Verify / label watch", webhookEvents.signals.labelChange],
-                ["Warranty label", webhookEvents.signals.warrantyLabel],
-              ] as Array<[string, TekmetricLiveSignal | null]>).map(([label, signal]) => (
-                <article key={String(label)}>
-                  <p>{label}</p>
-                  <strong>{signal ? relativeTime(signal.occurredAt || signal.receivedAt) : "—"}</strong>
-                  <small>{signal ? signal.detail : "No webhook yet"}</small>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
 
         {selectedLive && (
           <section className="recovery-panel" aria-label="Goal recovery based on current pace">
@@ -229,79 +234,163 @@ export default function OverviewView() {
           </section>
         )}
 
-        <section className="analysis-grid">
-          <article className="panel tech-panel">
-            <div className="panel-heading">
-              <div><p className="panel-kicker">PRODUCTION</p><h2>Technician Billed Hours</h2></div>
-              <span className="target-badge">{isToday ? "Daily target tracking" : "Target tracking"}</span>
-            </div>
-            <div className="tech-list">
-              {data.techs.map((tech) => {
-                const hasTarget = tech.target > 0;
-                const pct = hasTarget ? Math.min((tech.hours / tech.target) * 100, 100) : 100;
-                const over = hasTarget && tech.hours >= tech.target;
-                return (
-                  <div className="tech-row" key={tech.name}>
-                    <div className="tech-name"><span>{tech.name.slice(0, 1)}</span><strong>{tech.name}</strong></div>
-                    <div className="progress-wrap">
-                      <div className="progress-track"><div className={`progress-fill ${over ? "complete" : ""}`} style={{ width: `${pct}%` }} /><i /></div>
-                    </div>
-                    <div className="hours"><strong>{tech.hours.toFixed(1)}</strong><small>{hasTarget ? ` / ${tech.target} hrs` : " helper hrs"}</small><em className={over ? "over" : ""}>{hasTarget ? (over ? "Over target" : "In progress") : "No target"}</em></div>
+        <button
+          type="button"
+          className="overview-more-toggle"
+          aria-expanded={detailsOpen}
+          onClick={() => setDetailsOpen((open) => !open)}
+        >
+          {detailsOpen ? "Hide extra metrics" : "More metrics"} — labor, AR, technicians, trend, Ask Delta AI
+        </button>
+
+        {detailsOpen && (
+          <div className="overview-more-panel">
+            <section className="kpi-grid" aria-label="Extra shop metrics">
+              <article className="kpi-card">
+                <Icon>↗</Icon>
+                <div><p>Gross Profit</p><strong>{money.format(data.grossProfit)}</strong>
+                  {selectedLive ? (
+                    realChange && realChange.grossProfit !== null ? (
+                      <small className={realChange.grossProfit >= 0 ? "positive" : "negative"}>
+                        {realChange.grossProfit >= 0 ? "↑" : "↓"} {Math.abs(realChange.grossProfit).toFixed(1)}% <em>{realChange.label}</em>
+                      </small>
+                    ) : (
+                      <small><em>{range === "Today" ? "today" : "no prior-week data yet"}</em></small>
+                    )
+                  ) : (
+                    <small className="positive">↑ {data.gpChange}% <em>{data.comparison}</em></small>
+                  )}
+                </div>
+              </article>
+              <article className="kpi-card">
+                <Icon>⌕</Icon>
+                <div><p>Labor Sales</p><strong>{money.format(data.laborSales ?? laborSales ?? 0)}</strong>
+                  {selectedLive ? (
+                    realChange && realChange.laborSales !== null ? (
+                      <small className={realChange.laborSales >= 0 ? "positive" : "negative"}>
+                        {realChange.laborSales >= 0 ? "↑" : "↓"} {Math.abs(realChange.laborSales).toFixed(1)}% <em>{realChange.label}</em>
+                      </small>
+                    ) : (
+                      <small><em>{range === "Today" ? "today" : "no prior-week data yet"}</em></small>
+                    )
+                  ) : (
+                    <small className="positive">↑ {data.laborChange}% <em>{data.comparison}</em></small>
+                  )}
+                </div>
+              </article>
+              <article className="kpi-card">
+                <Icon>−</Icon>
+                <div><p>Less AR</p><strong>{selectedLive ? money.format(selectedLive.lessAR || 0) : "—"}</strong><small><em>Posted to A/R</em></small></div>
+              </article>
+              <article className="kpi-card">
+                <Icon>✓</Icon>
+                <div><p>Cleared from AR</p><strong>{selectedLive ? money.format(selectedLive.clearedFromAR || 0) : "—"}</strong><small><em>End of Day report</em></small></div>
+              </article>
+            </section>
+
+            {webhookEvents?.lastEventAt && (
+              <section className="webhook-live-panel" aria-label="Live Tekmetric webhook signals">
+                <div className="recovery-heading">
+                  <div>
+                    <p className="panel-kicker">CUSTOM INTEGRATION</p>
+                    <h2>Live Tekmetric Events</h2>
                   </div>
-                );
-              })}
-            </div>
-            <div className="legend"><span><i className="legend-target" />Target</span><span><i className="legend-done" />Completed</span><span><i className="legend-left" />Remaining</span></div>
-          </article>
+                  <span>Webhooks do not replace the shop PC reader</span>
+                </div>
+                <div className="webhook-live-grid">
+                  {([
+                    ["Posted / Complete / A/R / Payment", webhookEvents.signals.overviewFreshness],
+                    ["Work approved", webhookEvents.signals.lastApproval],
+                    ["Work declined", webhookEvents.signals.lastDecline],
+                    ["Schedule", webhookEvents.signals.scheduleChanged],
+                    ["Verify / label watch", webhookEvents.signals.labelChange],
+                    ["Warranty label", webhookEvents.signals.warrantyLabel],
+                  ] as Array<[string, TekmetricLiveSignal | null]>).map(([label, signal]) => (
+                    <article key={String(label)}>
+                      <p>{label}</p>
+                      <strong>{signal ? relativeTime(signal.occurredAt || signal.receivedAt) : "—"}</strong>
+                      <small>{signal ? signal.detail : "No webhook yet"}</small>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
 
-          <article className="panel trend-panel">
-            <div className="panel-heading">
-              <div><p className="panel-kicker">PERFORMANCE</p><h2>Sales Trend</h2></div>
-              <span className="target-badge">Daily sales</span>
-            </div>
-            <div className="chart-wrap">
-              <div className="axis-labels"><span>$20K</span><span>$15K</span><span>$10K</span><span>$5K</span></div>
-              <svg className="trend-chart" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Daily sales trend">
-                <defs>
-                  <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3d7eb8" stopOpacity=".34" /><stop offset="100%" stopColor="#3d7eb8" stopOpacity="0" /></linearGradient>
-                </defs>
-                <polygon points={`3,88 ${chartPoints} 97,88`} fill="url(#salesFill)" />
-                <polyline points={chartPoints} fill="none" stroke="#5b9ad4" strokeWidth="2.3" vectorEffect="non-scaling-stroke" />
-                {chartPoints.split(" ").map((point, index) => {
-                  const [cx, cy] = point.split(",");
-                  return <circle key={point} cx={cx} cy={cy} r="1.6" fill="#5b9ad4"><title>{`Day ${index + 1}: $${data.trend[index]}K`}</title></circle>;
-                })}
-              </svg>
-              <div className="date-labels">{data.trend.map((_, index) => <span key={index}>{index + 1}</span>)}</div>
-            </div>
-          </article>
-        </section>
+            <section className="analysis-grid">
+              <article className="panel tech-panel">
+                <div className="panel-heading">
+                  <div><p className="panel-kicker">PRODUCTION</p><h2>Technician Billed Hours</h2></div>
+                  <span className="target-badge">{isToday ? "Daily target tracking" : "Target tracking"}</span>
+                </div>
+                <div className="tech-list">
+                  {data.techs.map((tech: { name: string; hours: number; target: number }) => {
+                    const hasTarget = tech.target > 0;
+                    const pct = hasTarget ? Math.min((tech.hours / tech.target) * 100, 100) : 100;
+                    const over = hasTarget && tech.hours >= tech.target;
+                    return (
+                      <div className="tech-row" key={tech.name}>
+                        <div className="tech-name"><span>{tech.name.slice(0, 1)}</span><strong>{tech.name}</strong></div>
+                        <div className="progress-wrap">
+                          <div className="progress-track"><div className={`progress-fill ${over ? "complete" : ""}`} style={{ width: `${pct}%` }} /><i /></div>
+                        </div>
+                        <div className="hours"><strong>{tech.hours.toFixed(1)}</strong><small>{hasTarget ? ` / ${tech.target} hrs` : " helper hrs"}</small><em className={over ? "over" : ""}>{hasTarget ? (over ? "Over target" : "In progress") : "No target"}</em></div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="legend"><span><i className="legend-target" />Target</span><span><i className="legend-done" />Completed</span><span><i className="legend-left" />Remaining</span></div>
+              </article>
 
-        <section className="ai-panel panel">
-          <div className="ai-heading"><span>✦</span><div><p className="panel-kicker">SHOP ANALYST</p><h2>Ask Delta AI</h2></div></div>
-          <form id="ai-form" onSubmit={askAI} className="ai-form">
-            <input
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              placeholder="Ask about sales, gross profit, or technician hours…"
-              aria-label="Ask Delta AI"
-            />
-            <button type="submit" aria-label="Submit question" disabled={aiLoading}>
-              {aiLoading ? "…" : "➤"}
-            </button>
-          </form>
-          <div className="prompt-row">
-            <button onClick={() => usePrompt("Compare sales this week")}><span>▥</span>Compare this week</button>
-            <button onClick={() => usePrompt("Who hit their billed hours target?")}><span>♙</span>Who hit target?</button>
-            <button onClick={() => usePrompt("Explain the gross profit change")}><span>↗</span>Explain GP change</button>
+              <article className="panel trend-panel">
+                <div className="panel-heading">
+                  <div><p className="panel-kicker">PERFORMANCE</p><h2>Sales Trend</h2></div>
+                  <span className="target-badge">Daily sales</span>
+                </div>
+                <div className="chart-wrap">
+                  <div className="axis-labels"><span>$20K</span><span>$15K</span><span>$10K</span><span>$5K</span></div>
+                  <svg className="trend-chart" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Daily sales trend">
+                    <defs>
+                      <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3d7eb8" stopOpacity=".34" /><stop offset="100%" stopColor="#3d7eb8" stopOpacity="0" /></linearGradient>
+                    </defs>
+                    <polygon points={`3,88 ${chartPoints} 97,88`} fill="url(#salesFill)" />
+                    <polyline points={chartPoints} fill="none" stroke="#5b9ad4" strokeWidth="2.3" vectorEffect="non-scaling-stroke" />
+                    {chartPoints.split(" ").map((point: string, index: number) => {
+                      const [cx, cy] = point.split(",");
+                      return <circle key={point} cx={cx} cy={cy} r="1.6" fill="#5b9ad4"><title>{`Day ${index + 1}: $${data.trend[index]}K`}</title></circle>;
+                    })}
+                  </svg>
+                  <div className="date-labels">{data.trend.map((_: unknown, index: number) => <span key={index}>{index + 1}</span>)}</div>
+                </div>
+              </article>
+            </section>
+
+            <section className="ai-panel panel">
+              <div className="ai-heading"><span>✦</span><div><p className="panel-kicker">SHOP ANALYST</p><h2>Ask Delta AI</h2></div></div>
+              <form id="ai-form" onSubmit={askAI} className="ai-form">
+                <input
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  placeholder="Ask about sales, gross profit, or technician hours…"
+                  aria-label="Ask Delta AI"
+                />
+                <button type="submit" aria-label="Submit question" disabled={aiLoading}>
+                  {aiLoading ? "…" : "➤"}
+                </button>
+              </form>
+              <div className="prompt-row">
+                <button onClick={() => usePrompt("Compare sales this week")}><span>▥</span>Compare this week</button>
+                <button onClick={() => usePrompt("Who hit their billed hours target?")}><span>♙</span>Who hit target?</button>
+                <button onClick={() => usePrompt("Explain the gross profit change")}><span>↗</span>Explain GP change</button>
+              </div>
+              {answer && <div className="ai-answer"><span>✦</span><p>{answer}</p><button onClick={() => setAnswer("")}>×</button></div>}
+              {!aiConfigured && (
+                <button className="secondary-action" onClick={() => setAiSetupOpen(true)}>
+                  Connect OpenAI to activate Delta AI
+                </button>
+              )}
+            </section>
           </div>
-          {answer && <div className="ai-answer"><span>✦</span><p>{answer}</p><button onClick={() => setAnswer("")}>×</button></div>}
-          {!aiConfigured && (
-            <button className="secondary-action" onClick={() => setAiSetupOpen(true)}>
-              Connect OpenAI to activate Delta AI
-            </button>
-          )}
-        </section>
+        )}
 </>
   );
 }

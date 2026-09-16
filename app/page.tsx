@@ -266,6 +266,10 @@ export default function Home() {
       .finally(() => setAuthLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (range === "This month") setRange("This week");
+  }, [range]);
+
   async function submitLogin(event: FormEvent) {
     event.preventDefault();
     setLoginError("");
@@ -1220,7 +1224,7 @@ export default function Home() {
           range={range}
           rangeLabel={data.label}
           readerConnected={Boolean(liveSnapshot)}
-          onRangeChange={setRange}
+          onRangeChange={(next) => setRange(next === "This month" ? "This week" : next)}
           onOpenReader={() => setConnectionOpen(true)}
           onSignOut={signOut}
         />

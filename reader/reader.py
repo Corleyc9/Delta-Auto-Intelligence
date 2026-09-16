@@ -30,8 +30,12 @@ from config import (
     SERVICE_WRITERS,
     SHOP_REPORT_URL,
     STEER_HOT_LIST_URL,
+    VEHICLE_HISTORY_BATCH_MINUTES,
     Config,
+    config_from_dict,
+    normalize_vehicle_history_mode,
     save_config,
+    vehicle_history_allowed,
 )
 from numeric import currency, number
 from parsers.job_board import job_category, parse_age_days, parse_job_card
@@ -93,7 +97,23 @@ def configure() -> Config:
 def load_config() -> Config:
     if not CONFIG_PATH.exists():
         return configure()
-    return Config(**json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+    raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    config = config_from_dict(raw)
+    if (
+        raw.get("sync_minutes") != config.sync_minutes
+        or "full_report_minutes" not in raw
+        or "wip_audit_minutes" not in raw
+        or "vehicle_history_mode" not in raw
+    ):
+        save_config(config)
+        log(
+            "Updated reader cadence: "
+            f"Job Board every {config.sync_minutes} min, "
+            f"full reports every {config.full_report_minutes} min, "
+            f"WIP audit every {config.wip_audit_minutes} min, "
+            f"vehicle history {config.vehicle_history_mode}."
+        )
+    return config
 
 
 def click_text(page: Page, label: str) -> None:
@@ -2860,6 +2880,15 @@ def run(config: Config) -> None:
         last_vehicle_history_sync: datetime | None = None
         last_schedule_hour_key: str | None = None
         last_full_report_sync: datetime | None = None
+        history_pause_logged = False
+        log(
+            "Cadence: "
+            f"Job Board {config.sync_minutes} min, "
+            f"full reports {config.full_report_minutes} min, "
+            f"WIP audit {config.wip_audit_minutes} min, "
+            f"vehicle history {normalize_vehicle_history_mode(config.vehicle_history_mode)}, "
+            "schedule hourly 7am–7pm Central."
+        )
         while True:
             priority_cycle_started = time.monotonic()
             cycle_attention = None
@@ -2875,7 +2904,8 @@ def run(config: Config) -> None:
                     log(f"Manual schedule snapshot failed: {manual_schedule_exc}")
                 report_due = (
                     last_full_report_sync is None
-                    or datetime.now(timezone.utc) - last_full_report_sync > timedelta(minutes=5)
+                    or datetime.now(timezone.utc) - last_full_report_sync
+                    > timedelta(minutes=max(1, config.full_report_minutes))
                 )
                 if report_due:
                     sync_once(page, config)
@@ -2884,7 +2914,7 @@ def run(config: Config) -> None:
                     audit_due = (
                         last_ticket_audit_sync is None
                         or datetime.now(timezone.utc) - last_ticket_audit_sync
-                        > timedelta(minutes=20)
+                        > timedelta(minutes=max(1, config.wip_audit_minutes))
                     )
                     job_count = sync_job_board(context, config, audit_due)
                     if audit_due:
@@ -2915,20 +2945,32 @@ def run(config: Config) -> None:
                     cycle_attention = (status_for_site(job_signin_exc.site), str(job_signin_exc))
                 except Exception as job_exc:
                     log(f"Job Board sync failed: {job_exc}")
-                if (
-                    last_vehicle_history_sync is None
-                    or datetime.now(timezone.utc) - last_vehicle_history_sync
-                    > timedelta(minutes=20)
-                ):
-                    try:
-                        history_count = sync_vehicle_history(context, config, batch_size=2)
-                        last_vehicle_history_sync = datetime.now(timezone.utc)
-                        log(f"Vehicle history background batch completed: {history_count} customers")
-                    except NeedsSignInError as history_signin_exc:
-                        log(f"Vehicle history needs sign-in: {history_signin_exc}")
-                        cycle_attention = (status_for_site(history_signin_exc.site), str(history_signin_exc))
-                    except Exception as history_exc:
-                        log(f"Vehicle history sync failed: {history_exc}")
+                if vehicle_history_allowed(config.vehicle_history_mode):
+                    history_pause_logged = False
+                    if (
+                        last_vehicle_history_sync is None
+                        or datetime.now(timezone.utc) - last_vehicle_history_sync
+                        > timedelta(minutes=VEHICLE_HISTORY_BATCH_MINUTES)
+                    ):
+                        try:
+                            history_count = sync_vehicle_history(context, config, batch_size=2)
+                            last_vehicle_history_sync = datetime.now(timezone.utc)
+                            log(f"Vehicle history background batch completed: {history_count} customers")
+                        except NeedsSignInError as history_signin_exc:
+                            log(f"Vehicle history needs sign-in: {history_signin_exc}")
+                            cycle_attention = (status_for_site(history_signin_exc.site), str(history_signin_exc))
+                        except Exception as history_exc:
+                            log(f"Vehicle history sync failed: {history_exc}")
+                elif not history_pause_logged:
+                    mode = normalize_vehicle_history_mode(config.vehicle_history_mode)
+                    if mode == "off":
+                        log("Vehicle history crawl is paused (vehicle_history_mode=off).")
+                    else:
+                        log(
+                            "Vehicle history crawl waits for overnight Central "
+                            "(10:00 PM–6:00 AM). Daytime D1/CPU is left for Job Board and reports."
+                        )
+                    history_pause_logged = True
                 if (
                     last_steer_sync is None
                     or datetime.now(timezone.utc) - last_steer_sync > timedelta(hours=6)
@@ -2958,11 +3000,12 @@ def run(config: Config) -> None:
             except Exception as exc:
                 log(f"Sync failed: {exc}")
                 post_reader_status(config, "error", str(exc)[:500])
-            # Start the next tag/verification scan about one minute after this
-            # one began. Longer Tekmetric or AI work can occasionally consume
-            # the whole minute, in which case the next scan starts immediately.
+            # Wait out the Job Board cadence after this cycle began. A long
+            # Tekmetric or AI pass can consume the whole interval, in which
+            # case the next scan starts after a 1-second pause.
             elapsed = time.monotonic() - priority_cycle_started
-            time.sleep(max(1, 60 - elapsed))
+            interval = max(60, int(config.sync_minutes) * 60)
+            time.sleep(max(1, interval - elapsed))
 
 
 if __name__ == "__main__":

@@ -73,6 +73,31 @@ The reader logs `Delta Auto reader {version}+{hash} starting`. If the shop PC ha
 
 When Tekmetric, Steer, or NAPA needs a human sign-in, the loop reports **Needs Attention** and continues. It never blocks on `input()` during sync. Empty Job Board, shop, Steer, or Goal Miss scrapes are refused so the last valid snapshot stays in D1.
 
+## Windows reader cadence (D1 / CPU)
+
+Defaults are slower than the original ~1 minute Job Board loop so the shop PC and Cloudflare D1 free-tier row reads last through a Canton workday. Existing `reader-config.json` files that still have `sync_minutes: 1` are upgraded on the next start.
+
+| Work | Default | Notes |
+| --- | --- | --- |
+| Main loop / Job Board | **8 minutes** | `sync_minutes`. Needs Attention still posts every cycle. |
+| Full End of Day / technician / writer reports (Today, this week, last week) | **20 minutes** | `full_report_minutes`. Not every 5 minutes. |
+| WIP ticket audit + Goal Miss scrape | **60 minutes** | `wip_audit_minutes`. Was ~20 minutes. |
+| Schedule screenshots | **Hourly, 7am–7pm Central** | Unchanged on purpose; still not more than once per hour. |
+| Steer hot list | **6 hours** | Unchanged. |
+| Vehicle-history customer crawl | **Overnight only, 10pm–6am Central** | `vehicle_history_mode` default `overnight`. Set `off` to pause entirely, or `always` only if you accept daytime D1/CPU. Batches of 2 customers, 20 minutes apart, during that window. |
+
+Reinstall the reader ZIP from the dashboard after this build so the shop PC actually runs the new loop. Editing `reader-config.json` by hand is optional.
+
+## GM dashboard
+
+Overview is an **action board**: Needs Attention, Verify, Problems (aged WIP / critical GP findings), GP flags, then pace (hours, cars, ARO, sales, recovery). Extra Overview widgets (labor, A/R, technician bars, sales trend, Ask Delta AI, webhook event grid) sit under **More metrics**.
+
+The left rail keeps **Overview**, **Verify**, and **Board** in sight. Lot Walk, Goal Miss ticket detail, Ticket Auditor, Warranty, AI Review, Leads, Writers, Schedule, Payroll, Reader, and Settings are under **More**. Nothing was deleted.
+
+**This month** is hidden until the reader captures a real monthly range. The picker is Today / this week / last week only. Sample monthly numbers are not shown as if they were live.
+
+**Ask GM backup** stays in the header. Tekmetric Custom Integration webhook paths are unchanged. Do not invent a Tekmetric API. Webhooks and the shop PC reader remain the only live data paths.
+
 ## Tekmetric Custom Integration (webhooks)
 
 The shop does not have a full Tekmetric API. Use Custom Integration webhooks for live events, and keep the Windows reader for reports and Job Board detail.
@@ -164,6 +189,8 @@ Do not turn off the shop PC reader after enabling webhooks.
 - Reader version/build hash is visible on the dashboard, in `reader.log`, inside the ZIP, and beside Download.
 - Empty critical snapshots are rejected (HTTP 422) instead of wiping last-known state.
 - Sign-in needs are reported per system (`tekmetric_signin_required`, `steer_signin_required`, `napa_signin_required`) without freezing the loop.
+- Default reader cadence is 8 / 20 / 60 minutes (Job Board / full reports / WIP audit). Vehicle-history crawl is overnight Central only.
+- Overview is a GM action board; lower-daily-use screens live under **More**. This month sample is hidden.
 - Lazy `CREATE TABLE IF NOT EXISTS` statements from API routes are centralized in `db/ensure-schema.ts` and `drizzle/0001_consolidate_tables.sql`.
 - Tekmetric Custom Integration webhooks persist to D1 (`drizzle/0002_tekmetric_webhooks.sql`) without replacing the reader path.
 - Sanitized parser fixtures live in `reader/tests/fixtures/`.
