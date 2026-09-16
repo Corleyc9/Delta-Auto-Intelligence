@@ -18,7 +18,6 @@ export async function GET(request: Request) {
   const machineAuthorized = Boolean(
     env.READER_API_KEY && request.headers.get("x-reader-key") === env.READER_API_KEY,
   );
-  await ensureSchema(env.DB);
   if (machineAuthorized) {
     const pending = await env.DB.prepare(
       "SELECT requested_at FROM schedule_capture_request WHERE id = 1 AND status = 'pending'",

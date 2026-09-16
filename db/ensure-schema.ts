@@ -1,3 +1,5 @@
+import { d1ErrorText as errorText, isD1QuotaError } from "./d1-errors.ts";
+
 const TABLE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS shop_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -263,29 +265,7 @@ const ALTER_STATEMENTS = [
   `ALTER TABLE reader_status ADD COLUMN build_hash TEXT DEFAULT ''`,
 ];
 
-const REQUIRED_TABLES = [
-  "shop_snapshots",
-  "reader_status",
-  "schedule_snapshots",
-  "schedule_capture_request",
-] as const;
-
 const schemaJobs = new WeakMap<object, Promise<void>>();
-
-function errorText(error: unknown): string {
-  const parts: string[] = [];
-  let current: unknown = error;
-  for (let i = 0; i < 4 && current; i += 1) {
-    if (current instanceof Error) {
-      parts.push(current.message);
-      current = current.cause;
-      continue;
-    }
-    parts.push(String(current));
-    break;
-  }
-  return [...new Set(parts.map((part) => part.trim()).filter(Boolean))].join(" → ");
-}
 
 function isBenignSchemaError(error: unknown): boolean {
   const message = errorText(error).toLowerCase();
@@ -294,49 +274,6 @@ function isBenignSchemaError(error: unknown): boolean {
 
 function isIndexStatement(sql: string): boolean {
   return /^\s*CREATE\s+INDEX\b/i.test(sql);
-}
-
-function resultRows(result: unknown): Record<string, unknown>[] {
-  if (Array.isArray(result)) return result as Record<string, unknown>[];
-  if (result && typeof result === "object" && Array.isArray((result as { results?: unknown }).results)) {
-    return (result as { results: Record<string, unknown>[] }).results;
-  }
-  return [];
-}
-
-function splitCreateTable(sql: string): { table: string; columns: Array<{ name: string; definition: string }> } | null {
-  const match = sql.match(/CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(([\s\S]*)\)\s*$/i);
-  if (!match) return null;
-  const parts: string[] = [];
-  let current = "";
-  let depth = 0;
-  for (const char of match[2]) {
-    if (char === "(") depth += 1;
-    else if (char === ")") depth -= 1;
-    if (char === "," && depth === 0) {
-      parts.push(current.trim());
-      current = "";
-      continue;
-    }
-    current += char;
-  }
-  if (current.trim()) parts.push(current.trim());
-  const columns = parts.flatMap((part) => {
-    if (/^(PRIMARY KEY|UNIQUE|CHECK|CONSTRAINT|FOREIGN KEY)\b/i.test(part)) return [];
-    const column = part.match(/^["`]?(\w+)["`]?\s+(.+)$/s);
-    return column ? [{ name: column[1], definition: column[2].replace(/\s+/g, " ").trim() }] : [];
-  });
-  return { table: match[1], columns };
-}
-
-function alterColumnSql(table: string, name: string, definition: string): string | null {
-  if (/\bPRIMARY KEY\b/i.test(definition) || /\bUNIQUE\b/i.test(definition)) return null;
-  let next = definition.replace(/\bNOT NULL\b/gi, "").replace(/\s+/g, " ").trim();
-  if (!/\bDEFAULT\b/i.test(next)) {
-    if (/\bINTEGER\b|\bREAL\b|\bNUMERIC\b/i.test(next)) next += " DEFAULT 0";
-    else if (!/\bBLOB\b/i.test(next)) next += " DEFAULT ''";
-  }
-  return `ALTER TABLE ${table} ADD COLUMN ${name} ${next}`;
 }
 
 export function requireD1(database: unknown): D1Database {
@@ -352,6 +289,7 @@ async function runOne(database: D1Database, sql: string): Promise<void> {
   try {
     await database.prepare(sql).run();
   } catch (error) {
+    if (isD1QuotaError(error)) throw error;
     if (isBenignSchemaError(error)) return;
     if (isIndexStatement(sql)) return;
     throw new Error(`Schema statement failed: ${sql.split("\n")[0].slice(0, 80)} → ${errorText(error)}`, {
@@ -367,6 +305,7 @@ async function execOrRun(database: D1Database, statements: string[]): Promise<vo
       await database.exec(`${statements.map((sql) => sql.trim().replace(/;+$/, "")).join(";\n")};`);
       return;
     } catch (error) {
+      if (isD1QuotaError(error)) throw error;
       if (statements.length === 1 && (isBenignSchemaError(error) || isIndexStatement(statements[0]))) return;
     }
   }
@@ -375,73 +314,27 @@ async function execOrRun(database: D1Database, statements: string[]): Promise<vo
   }
 }
 
-async function existingColumns(database: D1Database, table: string): Promise<Set<string>> {
-  try {
-    const result = await database.prepare(`PRAGMA table_info(${table})`).all();
-    return new Set(resultRows(result).map((row) => String(row.name || "")));
-  } catch {
-    return new Set();
-  }
-}
-
-async function addMissingColumns(database: D1Database): Promise<void> {
-  for (const sql of TABLE_STATEMENTS) {
-    const parsed = splitCreateTable(sql);
-    if (!parsed) continue;
-    const have = await existingColumns(database, parsed.table);
-    if (have.size === 0) continue;
-    for (const column of parsed.columns) {
-      if (have.has(column.name)) continue;
-      const alter = alterColumnSql(parsed.table, column.name, column.definition);
-      if (!alter) continue;
-      try {
-        await database.prepare(alter).run();
-        have.add(column.name);
-      } catch (error) {
-        if (!isBenignSchemaError(error)) {
-          throw new Error(`Could not add ${parsed.table}.${column.name}: ${errorText(error)}`, { cause: error });
-        }
-      }
-    }
-  }
+async function applyKnownAlters(database: D1Database): Promise<void> {
   for (const sql of ALTER_STATEMENTS) {
     try {
       await database.prepare(sql).run();
     } catch (error) {
-      if (!isBenignSchemaError(error)) {
-        // Table may not exist yet; CREATE TABLE is the source of truth.
-        const message = errorText(error).toLowerCase();
-        if (!message.includes("no such table")) {
-          throw new Error(`Column migration failed: ${errorText(error)}`, { cause: error });
-        }
-      }
+      if (isD1QuotaError(error)) throw error;
+      if (isBenignSchemaError(error) || errorText(error).toLowerCase().includes("no such table")) continue;
+      throw new Error(`Column migration failed: ${errorText(error)}`, { cause: error });
     }
-  }
-}
-
-async function assertReaderTables(database: D1Database): Promise<void> {
-  const missing: string[] = [];
-  for (const table of REQUIRED_TABLES) {
-    const columns = await existingColumns(database, table);
-    if (columns.size === 0) missing.push(table);
-  }
-  if (missing.length) {
-    throw new Error(
-      `D1 is missing ${missing.join(", ")}. ensureSchema could not create them. Check that binding DB points at the shop database.`,
-    );
   }
 }
 
 async function applySchema(database: D1Database): Promise<void> {
   const tables = TABLE_STATEMENTS.filter((sql) => !isIndexStatement(sql));
   const indexes = TABLE_STATEMENTS.filter((sql) => isIndexStatement(sql));
-  // Tables first, then additive columns on older Sites-era tables, then indexes.
-  // Never wrap this in one D1 batch(): a single failed CREATE INDEX rolls back
-  // every new table (reader_status, schedule_*) and the reader sees empty HTTP 500s.
+  // Tables, then known additive columns, then indexes. Not one D1 batch(): a
+  // failed CREATE INDEX would roll back new tables. Do not PRAGMA every table
+  // on the hot path — that burns free-tier row reads.
   await execOrRun(database, tables);
-  await addMissingColumns(database);
+  await applyKnownAlters(database);
   await execOrRun(database, indexes);
-  await assertReaderTables(database);
 }
 
 export async function ensureSchema(database: D1Database | null | undefined): Promise<void> {
@@ -449,7 +342,9 @@ export async function ensureSchema(database: D1Database | null | undefined): Pro
   const existing = schemaJobs.get(db as object);
   if (existing) return existing;
   const pending = applySchema(db).catch((error) => {
-    schemaJobs.delete(db as object);
+    // Quota exhaustion will not recover until midnight UTC / a paid plan.
+    // Keep the rejected promise so later requests do not re-run 40 DDL statements.
+    if (!isD1QuotaError(error)) schemaJobs.delete(db as object);
     throw error;
   });
   schemaJobs.set(db as object, pending);

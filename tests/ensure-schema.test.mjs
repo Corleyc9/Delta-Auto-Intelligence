@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { handleApi, HttpError, jsonError, readJson } from "../app/lib/api-errors.ts";
+import { isD1QuotaError } from "../db/d1-errors.ts";
 import { ensureSchema, requireD1 } from "../db/ensure-schema.ts";
+
+const D1_QUOTA_MESSAGE =
+  "Your account has exceeded D1's free tier daily row read limit. Upgrade to a paid plan or wait until tomorrow (midnight UTC) to continue using this database.";
 
 function asD1(sqlite = new DatabaseSync(":memory:")) {
   const d1 = {
@@ -81,7 +85,7 @@ test("ensureSchema creates reader write tables on an empty database", async () =
   assert.equal(status.build_hash, "bef75f17f257");
 });
 
-test("ensureSchema adds missing columns on a Sites-era reader_status and shop_snapshots table", async () => {
+test("ensureSchema adds missing version columns on a Sites-era reader_status table", async () => {
   const { sqlite, d1 } = asD1();
   sqlite.exec(`
     CREATE TABLE reader_status (
@@ -92,30 +96,15 @@ test("ensureSchema adds missing columns on a Sites-era reader_status and shop_sn
     );
     INSERT INTO reader_status (id, status, detail, updated_at)
       VALUES (1, 'ok', 'legacy row', '2026-01-01T00:00:00Z');
-    CREATE TABLE shop_snapshots (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      start_date TEXT NOT NULL,
-      end_date TEXT NOT NULL,
-      total_sales REAL NOT NULL,
-      gross_profit REAL NOT NULL,
-      labor_sales REAL NOT NULL,
-      technicians_json TEXT NOT NULL
-    );
   `);
   await ensureSchema(d1);
   assert.ok(columnNames(sqlite, "reader_status").includes("version"));
   assert.ok(columnNames(sqlite, "reader_status").includes("build_hash"));
-  assert.ok(columnNames(sqlite, "shop_snapshots").includes("captured_at"));
   const row = await d1.prepare(
     "SELECT status, detail, updated_at, version, build_hash FROM reader_status WHERE id = 1",
   ).first();
   assert.equal(row.status, "ok");
   assert.equal(row.version, "");
-  await d1.prepare(`
-    INSERT INTO shop_snapshots
-      (start_date, end_date, total_sales, gross_profit, labor_sales, technicians_json, captured_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).bind("2026-09-09", "2026-09-15", 1, 1, 1, '{"period":"weekly","technicians":[{"name":"Mario"}]}', "2026-09-16T12:00:00Z").run();
 });
 
 test("a single failed CREATE INDEX in one D1 batch rolls back new reader tables", async () => {
@@ -163,6 +152,45 @@ test("handleApi turns thrown DB errors into JSON 500s instead of an empty body",
   const body = await response.json();
   assert.equal(body.error, "snapshot failed");
   assert.match(body.detail, /shop_snapshots/);
+});
+
+test("handleApi returns the Cloudflare D1 quota message as JSON 503", async () => {
+  const wrapped = new Error("D1_ERROR");
+  wrapped.cause = new Error(D1_QUOTA_MESSAGE);
+  const response = await handleApi("snapshot", async () => {
+    throw wrapped;
+  });
+  assert.equal(response.status, 503);
+  assert.ok(Number(response.headers.get("Retry-After")) >= 60);
+  const body = await response.json();
+  assert.equal(body.code, "d1_quota");
+  assert.match(body.error, /D1 free-tier daily limit exceeded/);
+  assert.match(body.detail, /free tier daily row read limit/);
+  assert.match(body.hint, /cannot restore reader sync/);
+});
+
+test("jsonError detects D1 quota from the Cloudflare console wording", async () => {
+  assert.equal(isD1QuotaError(new Error(D1_QUOTA_MESSAGE)), true);
+  const response = jsonError(new Error(`D1_ERROR: ${D1_QUOTA_MESSAGE}`), "reader-status failed");
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.match(body.detail, /midnight UTC/);
+});
+
+test("ensureSchema does not re-run DDL after a D1 quota failure", async () => {
+  let execCount = 0;
+  const d1 = {
+    prepare() {
+      return { bind() { return this; }, async run() { throw new Error(D1_QUOTA_MESSAGE); } };
+    },
+    async exec() {
+      execCount += 1;
+      throw new Error(D1_QUOTA_MESSAGE);
+    },
+  };
+  await assert.rejects(() => ensureSchema(d1), /row read limit/);
+  await assert.rejects(() => ensureSchema(d1), /row read limit/);
+  assert.equal(execCount, 1);
 });
 
 test("readJson rejects invalid bodies with HTTP 400", async () => {

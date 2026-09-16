@@ -30,7 +30,6 @@ const VALID_STATUSES = [
 export async function GET(_request: Request) {
   return handleApi("reader-status", async () => {
     const env = await runtimeEnv();
-    await ensureSchema(env.DB);
     const row = await env.DB.prepare(
       "SELECT status, detail, updated_at, version, build_hash FROM reader_status WHERE id = 1",
     ).first<Record<string, unknown>>();

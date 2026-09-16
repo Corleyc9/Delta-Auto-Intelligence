@@ -1,3 +1,5 @@
+import { d1ErrorText, d1QuotaJson, isD1QuotaError, secondsUntilUtcMidnight } from "../../db/d1-errors.ts";
+
 export class HttpError extends Error {
   status: number;
 
@@ -7,23 +9,14 @@ export class HttpError extends Error {
   }
 }
 
-function detailFrom(error: unknown): string {
-  const parts: string[] = [];
-  let current: unknown = error;
-  for (let i = 0; i < 4 && current; i += 1) {
-    if (current instanceof Error) {
-      parts.push(current.message);
-      current = current.cause;
-      continue;
-    }
-    parts.push(String(current));
-    break;
-  }
-  return [...new Set(parts.map((part) => part.trim()).filter(Boolean))].join(" → ").slice(0, 1500);
-}
-
 export function jsonError(error: unknown, fallback = "Server error", status = 500): Response {
-  return Response.json({ error: fallback, detail: detailFrom(error) }, { status });
+  if (isD1QuotaError(error)) {
+    return Response.json(d1QuotaJson(error), {
+      status: 503,
+      headers: { "Retry-After": String(secondsUntilUtcMidnight()) },
+    });
+  }
+  return Response.json({ error: fallback, detail: d1ErrorText(error) }, { status });
 }
 
 export async function handleApi(name: string, fn: () => Promise<Response>): Promise<Response> {
@@ -31,7 +24,7 @@ export async function handleApi(name: string, fn: () => Promise<Response>): Prom
     return await fn();
   } catch (error) {
     if (error instanceof HttpError) {
-      return Response.json({ error: error.message, detail: detailFrom(error.cause) }, { status: error.status });
+      return Response.json({ error: error.message, detail: d1ErrorText(error.cause) }, { status: error.status });
     }
     return jsonError(error, `${name} failed`);
   }
