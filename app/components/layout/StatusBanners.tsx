@@ -5,7 +5,6 @@ import type { ReaderRevision, ReaderStatus, TekmetricLiveEvents } from "@/app/li
 
 export default function StatusBanners({
   live,
-  range,
   capturedAt,
   readerStatus,
   packagedRevision,
@@ -20,52 +19,43 @@ export default function StatusBanners({
   webhookEvents: TekmetricLiveEvents | null;
   onOpenReader: () => void;
 }) {
+  const needsAttention = Boolean(readerStatus && readerStatus.status !== "ok");
   const statusLabel =
     readerStatus?.status === "tekmetric_signin_required" ? "TEKMETRIC SIGN-IN NEEDED"
       : readerStatus?.status === "steer_signin_required" ? "STEER SIGN-IN NEEDED"
         : readerStatus?.status === "napa_signin_required" ? "NAPA SIGN-IN NEEDED"
           : "READER NEEDS ATTENTION";
+  const hashMismatch = Boolean(
+    packagedRevision
+      && readerStatus?.buildHash
+      && readerStatus.buildHash !== packagedRevision.buildHash,
+  );
+  const webhookAge = webhookEvents?.lastEventAt
+    ? relativeTime(webhookEvents.lastEventAt)
+    : "";
+
   return (
     <>
-      <div className={`demo-banner ${live ? "connected" : ""}`}>
+      <div className={`status-strip ${live ? "connected" : "demo"}`}>
         <span>{live ? "LIVE TEKMETRIC" : "DEMO DATA"}</span>
-        {live
-          ? `Last synchronized ${new Date(capturedAt || "").toLocaleString()}`
-          : range === "This month"
-            ? "Monthly view is sample data — the reader only captures Today, this week, and last week."
-            : "Connect the Windows reader to replace these sample numbers with live Tekmetric reports."}
-        <button onClick={onOpenReader}>{live ? "Reader details →" : "Set up reader →"}</button>
+        <strong>
+          {live
+            ? `Synced ${capturedAt ? new Date(capturedAt).toLocaleString() : "—"}`
+            : "Reader captures Today, this week, and last week — connect the shop PC to replace sample numbers."}
+        </strong>
+        {webhookAge && <em>Webhooks {webhookAge}</em>}
+        {hashMismatch && (
+          <em>
+            Shop PC is on {readerStatus?.version || "unknown"}/{readerStatus?.buildHash} — reinstall from Download.
+          </em>
+        )}
+        <button onClick={onOpenReader}>{live ? "Reader →" : "Set up reader →"}</button>
       </div>
-      {readerStatus && readerStatus.status !== "ok" && (
+      {needsAttention && (
         <div className="attention-banner" role="alert">
           <span>{statusLabel}</span>
-          {readerStatus.detail || "Someone needs to sign back in on the shop computer."}
-          {readerStatus.updatedAt && ` (reported ${new Date(readerStatus.updatedAt).toLocaleString()})`}
-        </div>
-      )}
-      {packagedRevision && (
-        <div className="reader-revision-strip">
-          <span>Reader build</span>
-          <strong>{packagedRevision.version}</strong>
-          <code>{packagedRevision.buildHash}</code>
-          {readerStatus?.buildHash && readerStatus.buildHash !== packagedRevision.buildHash && (
-            <em>Shop PC is on {readerStatus.version || "unknown"}/{readerStatus.buildHash} — reinstall from Download.</em>
-          )}
-        </div>
-      )}
-      {webhookEvents?.lastEventAt && (
-        <div className="webhook-strip">
-          <span>Tekmetric webhooks</span>
-          <strong>Last event {relativeTime(webhookEvents.lastEventAt)}</strong>
-          {webhookEvents.signals.overviewFreshness && (
-            <em>{webhookEvents.signals.overviewFreshness.detail}</em>
-          )}
-          {webhookEvents.signals.lastApproval && (
-            <em>{webhookEvents.signals.lastApproval.detail}</em>
-          )}
-          {webhookEvents.signals.scheduleChanged && (
-            <em>{webhookEvents.signals.scheduleChanged.detail}</em>
-          )}
+          {readerStatus?.detail || "Someone needs to sign back in on the shop computer."}
+          {readerStatus?.updatedAt && ` (reported ${new Date(readerStatus.updatedAt).toLocaleString()})`}
         </div>
       )}
     </>

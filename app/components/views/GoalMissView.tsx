@@ -68,7 +68,7 @@ export default function GoalMissView() {
                 {!visibleGoalTickets.length && <div className="empty-leads"><strong>No tickets in this view</strong><p>Choose another filter or wait for the Windows reader to send the completed Wednesday–Tuesday RO detail.</p></div>}
               </div>
             </>}
-            {!goalMissSnapshot && <div className="empty-leads"><strong>Weekly posted-RO detail has not arrived yet</strong><p>Goal Miss analyzes completed Wednesday–Tuesday ROs from a favorited RO Profitability or RO History report. The separate WIP Ticket Auditor opens every current Work-in-Progress ticket about every 20 minutes.</p></div>}
+            {!goalMissSnapshot && <div className="empty-leads"><strong>Weekly posted-RO detail has not arrived yet</strong><p>Goal Miss analyzes completed Wednesday–Tuesday ROs from a favorited RO Profitability or RO History report. The separate WIP Ticket Auditor opens every current Work-in-Progress ticket about every 60 minutes.</p></div>}
           </section>
   );
 }

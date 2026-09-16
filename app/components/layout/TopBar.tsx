@@ -51,11 +51,10 @@ export default function TopBar({
         <button className="signout-button" onClick={onSignOut}>Sign out</button>
         <label className="range-picker">
           <span aria-hidden="true">▣</span>
-          <select value={range} onChange={(event) => onRangeChange(event.target.value as Range)}>
+          <select value={range === "This month" ? "This week" : range} onChange={(event) => onRangeChange(event.target.value as Range)}>
             <option>Today</option>
             <option>This week</option>
             <option>Last week</option>
-            <option>This month</option>
           </select>
           <strong>{rangeLabel}</strong>
         </label>
