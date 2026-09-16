@@ -1,3 +1,5 @@
+import { d1ErrorText as errorText, isD1QuotaError } from "./d1-errors.ts";
+
 const TABLE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS shop_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -259,17 +261,92 @@ const TABLE_STATEMENTS = [
 ];
 
 const ALTER_STATEMENTS = [
-  `ALTER TABLE reader_status ADD COLUMN version TEXT NOT NULL DEFAULT ''`,
-  `ALTER TABLE reader_status ADD COLUMN build_hash TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE reader_status ADD COLUMN version TEXT DEFAULT ''`,
+  `ALTER TABLE reader_status ADD COLUMN build_hash TEXT DEFAULT ''`,
 ];
 
-export async function ensureSchema(database: D1Database): Promise<void> {
-  await database.batch(TABLE_STATEMENTS.map((sql) => database.prepare(sql)));
+const schemaJobs = new WeakMap<object, Promise<void>>();
+
+function isBenignSchemaError(error: unknown): boolean {
+  const message = errorText(error).toLowerCase();
+  return /already exists|duplicate column|duplicate column name/.test(message);
+}
+
+function isIndexStatement(sql: string): boolean {
+  return /^\s*CREATE\s+INDEX\b/i.test(sql);
+}
+
+export function requireD1(database: unknown): D1Database {
+  if (!database || typeof (database as D1Database).prepare !== "function") {
+    throw new Error(
+      "D1 binding `DB` is unavailable. After the Sites→Worker cutover the dashboard expects wrangler.toml binding DB; a missing or renamed database makes reader writes crash.",
+    );
+  }
+  return database as D1Database;
+}
+
+async function runOne(database: D1Database, sql: string): Promise<void> {
+  try {
+    await database.prepare(sql).run();
+  } catch (error) {
+    if (isD1QuotaError(error)) throw error;
+    if (isBenignSchemaError(error)) return;
+    if (isIndexStatement(sql)) return;
+    throw new Error(`Schema statement failed: ${sql.split("\n")[0].slice(0, 80)} → ${errorText(error)}`, {
+      cause: error,
+    });
+  }
+}
+
+async function execOrRun(database: D1Database, statements: string[]): Promise<void> {
+  if (statements.length === 0) return;
+  if (typeof database.exec === "function") {
+    try {
+      await database.exec(`${statements.map((sql) => sql.trim().replace(/;+$/, "")).join(";\n")};`);
+      return;
+    } catch (error) {
+      if (isD1QuotaError(error)) throw error;
+      if (statements.length === 1 && (isBenignSchemaError(error) || isIndexStatement(statements[0]))) return;
+    }
+  }
+  for (const sql of statements) {
+    await runOne(database, sql);
+  }
+}
+
+async function applyKnownAlters(database: D1Database): Promise<void> {
   for (const sql of ALTER_STATEMENTS) {
     try {
       await database.prepare(sql).run();
-    } catch {
-      // Column already exists on databases created from the rebuilt schema.
+    } catch (error) {
+      if (isD1QuotaError(error)) throw error;
+      if (isBenignSchemaError(error) || errorText(error).toLowerCase().includes("no such table")) continue;
+      throw new Error(`Column migration failed: ${errorText(error)}`, { cause: error });
     }
   }
+}
+
+async function applySchema(database: D1Database): Promise<void> {
+  const tables = TABLE_STATEMENTS.filter((sql) => !isIndexStatement(sql));
+  const indexes = TABLE_STATEMENTS.filter((sql) => isIndexStatement(sql));
+  // Tables, then known additive columns, then indexes. Not one D1 batch(): a
+  // failed CREATE INDEX would roll back new tables. Do not PRAGMA every table
+  // on the hot path — that burns free-tier row reads.
+  await execOrRun(database, tables);
+  await applyKnownAlters(database);
+  await execOrRun(database, indexes);
+}
+
+export async function ensureSchema(database: D1Database | null | undefined): Promise<void> {
+  const db = requireD1(database);
+  const existing = schemaJobs.get(db as object);
+  if (existing) return existing;
+  const pending = applySchema(db).catch((error) => {
+    // Quota exhaustion will not recover until midnight UTC / a paid plan.
+    // Keep the rejected promise so later requests do not re-run 40 DDL statements.
+    if (!isD1QuotaError(error)) schemaJobs.delete(db as object);
+    throw error;
+  });
+  schemaJobs.set(db as object, pending);
+  return pending;
 }

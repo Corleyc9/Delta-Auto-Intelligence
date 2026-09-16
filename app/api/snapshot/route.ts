@@ -1,4 +1,5 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { handleApi, readJson } from "@/app/lib/api-errors";
 import { isEmptyCriticalSnapshot } from "@/app/lib/snapshot-guards";
 import { ensureSchema } from "@/db/ensure-schema";
 import { runtimeEnv } from "@/app/lib/runtime";
@@ -28,22 +29,25 @@ function validFinancialNumber(value: unknown): value is number {
 }
 
 export async function GET(request: Request) {
+  return handleApi("snapshot", async () => {
   const auth = await requireApiUser();
   if (auth instanceof Response) return auth;
   const env = await runtimeEnv();
-  await ensureSchema(env.DB);
   const requested = new URL(request.url).searchParams.get("period");
   const requestedPeriod = requested === "daily"
     ? "daily"
     : requested === "last_week"
       ? "last_week"
       : "weekly";
+  // Period lives inside technicians_json, so we still filter in JS — but only
+  // the newest few rows. Scanning 100 snapshots on every dashboard load (x3
+  // periods) burns D1 free-tier row reads.
   const rows = await env.DB.prepare(`
     SELECT start_date, end_date, total_sales, gross_profit, labor_sales,
            technicians_json, captured_at
     FROM shop_snapshots
     ORDER BY captured_at DESC, id DESC
-    LIMIT 100
+    LIMIT 15
   `).all<Record<string, unknown>>();
 
   const match = rows.results.find((row) => {
@@ -68,9 +72,11 @@ export async function GET(request: Request) {
       capturedAt: row.captured_at,
     },
   });
+  });
 }
 
 export async function POST(request: Request) {
+  return handleApi("snapshot", async () => {
   const env = await runtimeEnv();
   const expected = env.READER_API_KEY;
   const supplied = request.headers.get("x-reader-key");
@@ -78,7 +84,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unauthorized reader" }, { status: 401 });
   }
 
-  const payload = (await request.json()) as Partial<Snapshot>;
+  const payload = await readJson<Partial<Snapshot>>(request);
   if (
     !payload.startDate ||
     !payload.endDate ||
@@ -153,4 +159,5 @@ export async function POST(request: Request) {
   ).run();
 
   return Response.json({ ok: true, capturedAt }, { status: 201 });
+  });
 }
