@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useDashboard } from "@/app/dashboard-context";
 import { money } from "@/app/lib/format";
 
@@ -12,7 +13,11 @@ export default function VerifyQueueView() {
     verifyQueue,
     verificationHistory,
     visibleVerificationRecords,
+    verificationSavingId,
+    verificationMessage,
+    verificationMessageError,
   } = useDashboard();
+  const [notes, setNotes] = useState<Record<number, string>>({});
   return (
     <section className="job-control-page verify-page">
             <div className="page-heading">
@@ -37,6 +42,7 @@ export default function VerifyQueueView() {
               <button className={verificationView === "pending" ? "active" : ""} onClick={() => setVerificationView("pending")}>Needs Verification ({verifyQueue.length})</button>
               <button className={verificationView === "history" ? "active" : ""} onClick={() => setVerificationView("history")}>Verification History ({verificationHistory.length})</button>
             </div>
+            {verificationMessage && <p className={`verify-feedback${verificationMessageError ? " error" : ""}`} role="status">{verificationMessage}</p>}
             <div className="verify-list">
               {visibleVerificationRecords.map((item) => (
                 <article className={`verify-card ${item.status === "verified" ? "verified" : ""}`} key={item.id}>
@@ -54,8 +60,29 @@ export default function VerifyQueueView() {
                   <div className="verify-amount"><small>Estimate</small><strong>{money.format(item.amount)}</strong><span>{item.status === "verified" ? `${item.verifiedBy || "Dashboard user"} · ${item.verifiedAt ? new Date(item.verifiedAt).toLocaleString() : ""}` : "Waiting for your review"}</span></div>
                   <div className="verify-actions">
                     {item.detailUrl ? <a className="verify-open" href={item.detailUrl} target="_blank" rel="noreferrer">Open in Tekmetric →</a> : <span className="verify-open disabled">Link unavailable</span>}
-                    {item.status === "pending" && <button className="verify-complete" onClick={() => markVerified(item)}>✓ Verified</button>}
+                    {item.status === "pending" && (
+                      <button
+                        type="button"
+                        className="verify-complete"
+                        disabled={verificationSavingId === item.id}
+                        onClick={() => markVerified(item, notes[item.id] ?? "")}
+                      >
+                        {verificationSavingId === item.id ? "Saving…" : "✓ Verified"}
+                      </button>
+                    )}
                   </div>
+                  {item.status === "pending" && (
+                    <label className="verify-note-field">
+                      <span>Optional note</span>
+                      <input
+                        type="text"
+                        maxLength={600}
+                        value={notes[item.id] ?? ""}
+                        onChange={(event) => setNotes((current) => ({ ...current, [item.id]: event.target.value }))}
+                        placeholder="Leave blank if none"
+                      />
+                    </label>
+                  )}
                   {item.verificationNote && <p className="verification-note">Note: {item.verificationNote}</p>}
                 </article>
               ))}
