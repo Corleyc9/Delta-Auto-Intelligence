@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import PayrollPanel from "./payroll/PayrollPanel";
 import { businessDaysInclusive, dashboardRanges } from "./lib/calendar";
 import { SAMPLE_RANGE_DATA, WEEKLY_CAR_GOAL, WEEKLY_HOURS_SOLD_GOAL, WEEKLY_SALES_GOAL, ARO_GOAL, HOURS_PER_RO_GOAL, technicianWeeklyTarget } from "./lib/goals";
@@ -103,6 +103,10 @@ export default function Home() {
   const [warrantyView, setWarrantyView] = useState<"open" | "submitted" | "paid" | "all">("open");
   const [warrantySaving, setWarrantySaving] = useState<string | null>(null);
   const [verificationView, setVerificationView] = useState<"pending" | "history">("pending");
+  const [verificationSavingId, setVerificationSavingId] = useState<number | null>(null);
+  const [verificationMessage, setVerificationMessage] = useState("");
+  const [verificationMessageError, setVerificationMessageError] = useState(false);
+  const verificationSavingRef = useRef<number | null>(null);
   const [jobBoardCapturedAt, setJobBoardCapturedAt] = useState<string | null>(null);
   const [webhookEvents, setWebhookEvents] = useState<TekmetricLiveEvents | null>(null);
   const [jobSection, setJobSection] = useState<"all" | RepairOrder["section"]>("work-in-progress");
@@ -503,20 +507,33 @@ export default function Home() {
     }
   }
 
-  async function markVerified(record: VerificationRecord) {
-    const note = window.prompt("Optional verification note (leave blank if none):")?.trim();
-    if (note === undefined) return;
-    const response = await fetch("/api/verifications", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: record.id, note }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      window.alert(payload?.error || "The verification could not be saved.");
-      return;
+  async function markVerified(record: VerificationRecord, note = "") {
+    if (verificationSavingRef.current === record.id) return;
+    verificationSavingRef.current = record.id;
+    setVerificationSavingId(record.id);
+    setVerificationMessage("");
+    setVerificationMessageError(false);
+    try {
+      const response = await fetch("/api/verifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: record.id, note: String(note || "").trim() }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.record) {
+        setVerificationMessageError(true);
+        setVerificationMessage(payload?.error || "The verification could not be saved.");
+        return;
+      }
+      setVerificationRecords((current) => current.map((item) => item.id === record.id ? payload.record : item));
+      setVerificationMessage(`RO#${record.roNumber} marked verified.`);
+    } catch (error) {
+      setVerificationMessageError(true);
+      setVerificationMessage(error instanceof Error ? error.message : "The verification could not be saved.");
+    } finally {
+      verificationSavingRef.current = null;
+      setVerificationSavingId(null);
     }
-    setVerificationRecords((current) => current.map((item) => item.id === record.id ? payload.record : item));
   }
 
   useEffect(() => {
@@ -1096,6 +1113,10 @@ export default function Home() {
       setWarrantySaving,
       verificationView,
       setVerificationView,
+      verificationSavingId,
+      verificationMessage,
+      verificationMessageError,
+      markVerified,
       jobBoardCapturedAt,
       setJobBoardCapturedAt,
       jobSection,
@@ -1181,6 +1202,18 @@ export default function Home() {
       refreshWebhookEvents,
       webhookEvents,
       updateGoalDisposition,
+      updateAuditDisposition,
+      updateWarrantyClaim,
+      chooseWarrantyOriginal,
+      requestScheduleCapture,
+      clearDeltaAiAudit,
+      updateOpportunityStatus,
+      refreshLotWalkAudits,
+      uploadLotWalkVideo,
+      openLotWalkDetail,
+      saveLotWalkResult,
+      assignLotWalkRo,
+      markLotWalkFixed,
       businessQueue,
       personalQueue,
       dailyCallQueue,

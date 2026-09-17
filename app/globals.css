@@ -620,8 +620,15 @@ button { color: inherit; }
 .verify-tabs button.active { border-color: rgba(49,196,141,.5); background: rgba(49,196,141,.1); color: #61dda9; }
 .verify-actions { display: flex !important; align-items: stretch; gap: 7px !important; }
 .verify-complete { padding: 9px 11px; border: 1px solid #31c48d; border-radius: 7px; color: #07120d; background: #61dda9; font-size: 11px; font-weight: 900; cursor: pointer; white-space: nowrap; }
+.verify-complete:disabled { opacity: .65; cursor: wait; }
 .verify-card.verified { border-left-color: #31c48d; }
 .verify-card.verified .verify-status span { background: rgba(49,196,141,.14); color: #61dda9; }
+.verify-feedback { margin: 0 0 12px; padding: 10px 12px; border: 1px solid rgba(49,196,141,.4); border-radius: 8px; background: rgba(49,196,141,.1); color: #61dda9; font-size: 12px; font-weight: 700; }
+.verify-feedback.error { border-color: rgba(239,37,45,.48); background: rgba(215,25,32,.08); color: #ffaaa3; }
+.verify-note-field { grid-column: 1 / -1; display: grid; gap: 5px; min-width: 0; }
+.verify-note-field span { color: var(--dim); font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.verify-note-field input { min-height: 40px; width: 100%; border: 1px solid var(--border); border-radius: 7px; background: #15191d; color: #d9dde0; padding: 0 11px; outline: 0; }
+.verify-note-field input:focus { border-color: rgba(49,196,141,.5); }
 .verification-note { grid-column: 2 / -1; margin: 0; color: var(--dim); font-size: 11px; }
 .job-age strong { font-family: Impact, "Arial Narrow", sans-serif; font-size: 25px; font-weight: 500; }
 .job-label strong { color: #e0e3e6; }
