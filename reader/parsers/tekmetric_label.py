@@ -4,14 +4,15 @@ import os
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-from config import JOB_BOARD_LABELS
-
-# Exact Job Board string used by this shop. Incoming "Verify" / "Verify
-# Parts&Labor" tags mean the RO still needs GM review. After dashboard
-# Verified, the outgoing tag is this one (Devin: "verified/ send estimate").
+# Confirmed from Devin's Job Board teach demo (shop 4326, ACTIVE column view):
+# the dropdown chip is exactly "Verified/Send Estimate" (slash, no spaces).
+# Incoming "Verify" / "Verify Parts&Labor" tags mean the RO still needs GM
+# review. After dashboard Verified, the outgoing tag is this one.
 DEFAULT_TEKMETRIC_VERIFY_LABEL = "Verified/Send Estimate"
 
 _SUFFIXES = ("/estimate", "/inspection", "/inspections", "/parts", "/jobs")
+_SIGNIN_PATH = re.compile(r"/(?:login|log-in|signin|sign-in|auth|session)(?:/|$)", re.I)
+_RO_DETAIL_PATH = re.compile(r"/admin/shop/4326/repair-orders/\d+", re.I)
 
 
 def normalize_label(value: str) -> str:
@@ -37,13 +38,13 @@ def resolve_verify_label(job_target: str = "", env: dict | None = None) -> str:
 
 
 def label_click_candidates(target: str) -> list[str]:
-    """Exact shop string first, then spacing variants Devin might quote."""
+    """Exact shop string first. Spacing variants are click fallbacks only."""
     raw = (target or "").strip() or DEFAULT_TEKMETRIC_VERIFY_LABEL
     variants = [
         raw,
+        DEFAULT_TEKMETRIC_VERIFY_LABEL,
         raw.replace("/", " / ").replace("  ", " "),
         raw.replace(" / ", "/"),
-        "Verified/Send Estimate",
         "Verified / Send Estimate",
         "Verified/ Send Estimate",
     ]
@@ -58,23 +59,45 @@ def label_click_candidates(target: str) -> list[str]:
     return ordered
 
 
+def is_repair_order_detail_url(url: str) -> bool:
+    """True for /admin/shop/4326/repair-orders/{internalId} deep links."""
+    return bool(_RO_DETAIL_PATH.search(urlsplit(url or "").path))
+
+
+def is_tekmetric_signin_url(url: str) -> bool:
+    """Session-expired redirects leave shop.tekmetric.com for a login page."""
+    value = (url or "").strip()
+    if not value:
+        return False
+    parts = urlsplit(value)
+    host = (parts.hostname or "").lower()
+    path = parts.path or "/"
+    if host.endswith("tekmetric.com"):
+        if _SIGNIN_PATH.search(path):
+            return True
+        if "/admin/shop/" not in path.lower() and re.search(r"login|sign[-_]?in", path, re.I):
+            return True
+        return False
+    return bool(re.search(r"login|sign[-_]?in|session", value, re.I))
+
+
 def repair_order_page_url(detail_url: str, ro_number: str = "") -> str:
-    """Open the RO header (label chip), not the estimate sub-page."""
+    """Clean a real RO deep link. Do not invent /repair-orders/{RO#}.
+
+    Tekmetric ids in the demo are internal (e.g. repair-orders/366529871),
+    not the shop-facing RO number.
+    """
     url = (detail_url or "").strip()
-    if url:
-        parts = urlsplit(url)
-        path = parts.path.rstrip("/")
-        lowered = path.lower()
-        for suffix in _SUFFIXES:
-            if lowered.endswith(suffix):
-                path = path[: -len(suffix)]
-                break
-        return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
-    ro = re.sub(r"\D", "", str(ro_number or ""))
-    if ro:
-        return f"https://shop.tekmetric.com/admin/shop/4326/repair-orders/{ro}"
-    return ""
-
-
-def known_job_board_labels() -> tuple[str, ...]:
-    return JOB_BOARD_LABELS
+    if not url:
+        return ""
+    parts = urlsplit(url)
+    path = parts.path.rstrip("/")
+    lowered = path.lower()
+    for suffix in _SUFFIXES:
+        if lowered.endswith(suffix):
+            path = path[: -len(suffix)]
+            break
+    cleaned = urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+    if is_repair_order_detail_url(cleaned):
+        return cleaned
+    return cleaned if url else ""

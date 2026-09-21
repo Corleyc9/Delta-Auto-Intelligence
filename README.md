@@ -57,7 +57,7 @@ Configure these on the Worker. Never commit values.
 | `TEKMETRIC_WEBHOOK_PATH_TOKEN` | Unguessable path segment for the Custom Integration URL (`/api/webhooks/tekmetric/<token>`). Generate with `openssl rand -hex 32`. |
 | `TEKMETRIC_WEBHOOK_SECRET` | Optional shared secret. Put it in the webhook URL as `?secret=...` (Tekmetric’s Custom Integration UI is name + URL + event checkboxes; it does not document HMAC). Also accepted as `X-Tekmetric-Webhook-Secret`, `Authorization: Bearer`, or HMAC-SHA256 if a signature header is ever sent. |
 | `TEKMETRIC_SHOP_ID` | Optional. Defaults to `4326`. Events with a different shop id are stored but do not change shop signals. |
-| `TEKMETRIC_VERIFY_LABEL` | Optional. Exact Tekmetric Job Board label applied after dashboard **Verified**. Defaults to `Verified/Send Estimate` (the shop string in `reader/config.py` `JOB_BOARD_LABELS`). Set this if Devin’s live chip text differs, for example `Verified / Send Estimate`. |
+| `TEKMETRIC_VERIFY_LABEL` | Optional. Exact Tekmetric Job Board label applied after dashboard **Verified**. Defaults to `Verified/Send Estimate` (slash, no spaces — confirmed on Devin’s teach demo). Set this only if the live chip text ever changes. |
 
 Logical bindings in `wrangler.toml` and `.openai/hosting.json`: `d1` = `DB`, `r2` = `BUCKET`. This rebuild does not reuse the previous Sites `project_id`.
 
@@ -103,10 +103,10 @@ The left rail keeps **Overview**, **Verify**, and **Board** in sight. Lot Walk, 
 
 Dashboard **Verified** still saves immediately (including when the shop PC is offline). It also enqueues a durable job keyed by RO# so the Windows reader can change that RO’s Tekmetric Job Board label on the next loop.
 
-- **Default label string:** `Verified/Send Estimate` (exact chip text in `JOB_BOARD_LABELS`, matching Devin’s “verified/ send estimate”). Incoming tags `Verify`, `Verify Parts&Labor`, and `Verify Parts/Labor` still mean *needs review* and are not written back.
-- **Override:** Worker env/secret `TEKMETRIC_VERIFY_LABEL` (no code change). The shop PC can also set the same name in the reader process environment if a job arrives without a target.
+- **Default label string:** `Verified/Send Estimate` (slash, no spaces — confirmed on Devin’s Job Board dropdown teach demo; orange/red chip). Incoming tags `Verify`, `Verify Parts&Labor`, and `Verify Parts/Labor` still mean *needs review* and are not written back.
+- **Override:** Worker env/secret `TEKMETRIC_VERIFY_LABEL` (no code change). Leave unset unless the live chip text ever changes.
 - **UI:** Verify history shows Tekmetric label **waiting for shop reader** / **applying** / the applied name / **failed** plus the reader error.
-- **Behavior:** the reader opens the RO (not `/estimate`) in the already signed-in Chrome profile and selects that one status label. Tekmetric Job Board labels are a single chip; choosing the new one replaces whatever was there. No Tekmetric password is stored on the Worker.
+- **Behavior:** the shop reader uses the signed-in Chrome profile on **Job Board ACTIVE column view** (`shop 4326`). It opens the status/label dropdown **on the RO card** and selects `Verified/Send Estimate`, replacing e.g. In-Progress. RO deep links look like `/admin/shop/4326/repair-orders/{internalId}` and are a fallback only; a session-expired redirect becomes Needs Attention, not a burned job. No Tekmetric password is stored on the Worker.
 
 After deploy, reinstall the reader ZIP from the dashboard so the shop PC loop actually claims these jobs.
 

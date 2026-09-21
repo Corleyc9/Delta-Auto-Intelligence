@@ -4,7 +4,7 @@
  * Tekmetric has no public write API for this shop. markVerified stores a
  * durable job; the signed-in Windows reader applies the label in the UI.
  *
- * Shop Job Board label (reader/config.py JOB_BOARD_LABELS):
+ * Confirmed Job Board chip from Devin's teach demo (slash, no spaces):
  *   "Verified/Send Estimate"
  * Incoming queue tags ("Verify", "Verify Parts&Labor") mean *needs* review.
  * After GM clicks Verified, the outgoing tag is Verified/Send Estimate.

@@ -195,7 +195,10 @@ test("Verify UI and reader still work if the shop PC is offline", async () => {
   assert.match(view, /waiting for shop reader/);
   assert.match(view, /Tekmetric label failed/);
   assert.match(reader, /sync_tekmetric_label_jobs/);
-  assert.match(reader, /apply_tekmetric_ro_label/);
+  assert.match(reader, /apply_via_job_board_card/);
+  assert.match(reader, /JOB_BOARD_URL/);
+  assert.match(reader, /board=ACTIVE/);
+  assert.match(reader, /raise_if_tekmetric_signin/);
   assert.match(reader, /action": "claim"/);
   assert.doesNotMatch(reader, /TEKMETRIC_PASSWORD|tekmetric_password/);
   const jobsRoute = await read("app/api/tekmetric-label-jobs/route.ts");
