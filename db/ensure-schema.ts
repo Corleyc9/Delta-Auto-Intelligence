@@ -54,10 +54,34 @@ const TABLE_STATEMENTS = [
     verified_at TEXT,
     verified_by TEXT,
     verification_note TEXT NOT NULL DEFAULT '',
-    last_seen_at TEXT NOT NULL
+    last_seen_at TEXT NOT NULL,
+    tekmetric_label_status TEXT NOT NULL DEFAULT '',
+    tekmetric_label_target TEXT NOT NULL DEFAULT '',
+    tekmetric_label_error TEXT NOT NULL DEFAULT '',
+    tekmetric_label_updated_at TEXT,
+    tekmetric_label_job_id INTEGER
   )`,
   `CREATE INDEX IF NOT EXISTS ro_verification_status_idx
     ON ro_verification_cycles (status, diagnosed_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS tekmetric_label_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ro_number TEXT NOT NULL,
+    verification_id INTEGER,
+    target_label TEXT NOT NULL,
+    current_label TEXT NOT NULL DEFAULT '',
+    detail_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    claimed_at TEXT,
+    completed_at TEXT,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS tekmetric_label_jobs_status_idx
+    ON tekmetric_label_jobs (status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS tekmetric_label_jobs_ro_idx
+    ON tekmetric_label_jobs (ro_number, created_at DESC)`,
   `CREATE TABLE IF NOT EXISTS ro_sold_hours_watch (
     ro_number TEXT PRIMARY KEY, sold_hours REAL NOT NULL DEFAULT 0, last_seen_at TEXT NOT NULL
   )`,
@@ -263,6 +287,11 @@ const TABLE_STATEMENTS = [
 const ALTER_STATEMENTS = [
   `ALTER TABLE reader_status ADD COLUMN version TEXT DEFAULT ''`,
   `ALTER TABLE reader_status ADD COLUMN build_hash TEXT DEFAULT ''`,
+  `ALTER TABLE ro_verification_cycles ADD COLUMN tekmetric_label_status TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE ro_verification_cycles ADD COLUMN tekmetric_label_target TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE ro_verification_cycles ADD COLUMN tekmetric_label_error TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE ro_verification_cycles ADD COLUMN tekmetric_label_updated_at TEXT`,
+  `ALTER TABLE ro_verification_cycles ADD COLUMN tekmetric_label_job_id INTEGER`,
 ];
 
 const schemaJobs = new WeakMap<object, Promise<void>>();

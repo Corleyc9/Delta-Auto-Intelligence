@@ -94,6 +94,7 @@ test("warranty payment labels are recognized from Job Board wording", () => {
   assert.equal(isWarrantyPaymentLabel("Need Warranty Pmt"), true);
   assert.equal(isWarrantyPaymentLabel("Needs Ext Warr Payment"), true);
   assert.equal(isVerifyLabel("Verify"), true);
+  assert.equal(isVerifyLabel("Verified/Send Estimate"), false);
   assert.equal(isNeedsDiagLabel("Needs Diag."), true);
   assert.equal(isWarrantyPaymentLabel("In-Progress"), false);
 });

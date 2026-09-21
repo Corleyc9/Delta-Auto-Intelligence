@@ -40,6 +40,12 @@ from config import (
 from numeric import currency, number
 from parsers.job_board import job_category, parse_age_days, parse_job_card
 from parsers.steer import classify_customer, parse_steer_row
+from parsers.tekmetric_label import (
+    label_click_candidates,
+    labels_match,
+    repair_order_page_url,
+    resolve_verify_label,
+)
 from version import READER_BUILD_HASH, READER_REVISION, READER_VERSION
 
 HTTP = requests.Session()
@@ -935,6 +941,46 @@ def post_vehicle_history(config: Config, payload: dict) -> None:
         timeout=120,
     )
     response.raise_for_status()
+
+
+def claim_tekmetric_label_jobs(config: Config) -> list[dict]:
+    response = HTTP.post(
+        f"{config.dashboard_url}/api/tekmetric-label-jobs",
+        json={"action": "claim", "limit": 4},
+        headers={
+            "x-reader-key": config.reader_api_key,
+            "OAI-Sites-Authorization": f"Bearer {config.sites_machine_token}",
+        },
+        timeout=30,
+    )
+    if response.status_code == 401:
+        raise RuntimeError("Dashboard rejected the reader key for Tekmetric label jobs.")
+    response.raise_for_status()
+    payload = response.json()
+    jobs = payload.get("jobs") if isinstance(payload, dict) else None
+    return jobs if isinstance(jobs, list) else []
+
+
+def ack_tekmetric_label_job(config: Config, job_id: object, status: str, error: str = "") -> None:
+    response = HTTP.post(
+        f"{config.dashboard_url}/api/tekmetric-label-jobs",
+        json={
+            "action": "ack",
+            "id": job_id,
+            "status": status,
+            "error": str(error or "")[:500],
+        },
+        headers={
+            "x-reader-key": config.reader_api_key,
+            "OAI-Sites-Authorization": f"Bearer {config.sites_machine_token}",
+        },
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"Dashboard rejected Tekmetric label ack ({response.status_code}): "
+            f"{response.text[:300]}"
+        )
 
 
 def history_progress() -> dict:
@@ -2493,6 +2539,225 @@ def sync_delta_ai_estimates(context, config: Config, repair_orders: list[dict]) 
         page.close()
 
 
+_HEADER_LABEL_JS = """(label) => {
+  const wanted = String(label || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  if (!wanted) return false;
+  const nodes = Array.from(document.querySelectorAll(
+    'button, [role="button"], [role="combobox"], [aria-haspopup], span, div, a, select'
+  ));
+  for (const el of nodes) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8 || r.top < 0 || r.top > 280) continue;
+    const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    if (text === wanted) return true;
+  }
+  return false;
+}"""
+
+_OPEN_LABEL_PICKER_JS = """(args) => {
+  document.querySelectorAll('[data-reader-label-opener]')
+    .forEach(el => el.removeAttribute('data-reader-label-opener'));
+  const known = new Set((args.knownLabels || [])
+    .map(s => String(s).replace(/\\s+/g, ' ').trim().toLowerCase()));
+  const current = String(args.currentLabel || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const target = String(args.targetLabel || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const candidates = [];
+  const nodes = Array.from(document.querySelectorAll(
+    'button, [role="button"], [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], select, a, span, div'
+  ));
+  for (const el of nodes) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 10 || r.height < 10 || r.top < 0 || r.top > 280) continue;
+    const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (!text || text.length > 64) continue;
+    const lower = text.toLowerCase();
+    const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+    let score = 0;
+    if (current && lower === current) score = 50;
+    else if (known.has(lower) && lower !== target) score = 30;
+    else if (aria.includes('label') || aria.includes('tag')) score = 20;
+    else continue;
+    score += Math.max(0, 20 - Math.min(text.length, 20));
+    candidates.push({ el, score, text, top: r.top });
+  }
+  candidates.sort((a, b) => b.score - a.score || a.top - b.top);
+  if (!candidates.length) return { found: false };
+  candidates[0].el.setAttribute('data-reader-label-opener', 'true');
+  return { found: true, text: candidates[0].text };
+}"""
+
+
+def header_shows_label(page: Page, target: str) -> bool:
+    return any(page.evaluate(_HEADER_LABEL_JS, candidate) for candidate in label_click_candidates(target))
+
+
+def try_native_label_select(page: Page, target: str) -> bool:
+    selects = page.locator("select")
+    for index in range(min(selects.count(), 12)):
+        select = selects.nth(index)
+        try:
+            if not select.is_visible():
+                continue
+            option_texts = select.locator("option").evaluate_all(
+                "opts => opts.map(o => (o.textContent || '').trim())"
+            )
+            match = next((item for item in option_texts if labels_match(item, target)), None)
+            if match:
+                select.select_option(label=match)
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def click_label_option(page: Page, target: str) -> bool:
+    for candidate in label_click_candidates(target):
+        if visible_text_exists(page, candidate):
+            click_visible_text(page, candidate)
+            return True
+    spaced = re.sub(r"[\s/]+", r"[\\s/]+", re.escape(target))
+    loc = page.get_by_text(re.compile(rf"^\s*{spaced}\s*$", re.I))
+    for index in range(loc.count() - 1, -1, -1):
+        item = loc.nth(index)
+        if item.is_visible():
+            item.click()
+            return True
+    return False
+
+
+def apply_tekmetric_ro_label(page: Page, job: dict) -> None:
+    """Set this RO's Job Board label to the configured Verify/Send Estimate tag.
+
+    Tekmetric shop labels are a single status chip (JOB_BOARD_LABELS). Clicking
+    a new option replaces the current one; we do not clear extra tags.
+    """
+    target = resolve_verify_label(str(job.get("targetLabel") or ""))
+    current = str(job.get("currentLabel") or "")
+    ro_number = str(job.get("roNumber") or "")
+    url = repair_order_page_url(str(job.get("detailUrl") or ""), ro_number)
+    if not url:
+        raise RuntimeError(f"RO#{ro_number} has no Tekmetric URL for a label change")
+    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(1600)
+    dismiss_tekmetric_pendo(page)
+    if "shop.tekmetric.com" not in (page.url or ""):
+        raise NeedsSignInError(
+            "Tekmetric",
+            "Tekmetric did not stay on the repair order. Sign in on the shop PC.",
+        )
+    body_head = page.locator("body").inner_text()[:2000]
+    if re.search(r"\b(sign in|log in)\b", body_head, re.I) and f"RO#{ro_number}" not in body_head:
+        raise NeedsSignInError(
+            "Tekmetric",
+            "Tekmetric asked for sign-in before the repair order opened.",
+        )
+    if header_shows_label(page, target):
+        return
+    if try_native_label_select(page, target):
+        page.wait_for_timeout(800)
+        if header_shows_label(page, target):
+            return
+    opened = page.evaluate(_OPEN_LABEL_PICKER_JS, {
+        "knownLabels": list(JOB_BOARD_LABELS),
+        "currentLabel": current,
+        "targetLabel": target,
+    })
+    if opened and opened.get("found"):
+        opener = page.locator("[data-reader-label-opener]").first
+        if opener.count():
+            opener.click(force=True)
+            page.wait_for_timeout(450)
+    elif current and visible_text_exists(page, current):
+        click_visible_text(page, current)
+        page.wait_for_timeout(450)
+    else:
+        combo = page.get_by_role("combobox")
+        clicked = False
+        for index in range(combo.count()):
+            item = combo.nth(index)
+            if item.is_visible():
+                item.click()
+                clicked = True
+                page.wait_for_timeout(450)
+                break
+        if not clicked:
+            raise RuntimeError(f"Could not find the Tekmetric label control on RO#{ro_number}")
+    if not click_label_option(page, target):
+        typed = False
+        for locator in (
+            page.locator("input[type='search']"),
+            page.locator("[role='listbox'] input"),
+            page.locator("input[type='text']"),
+        ):
+            if locator.count() and locator.first.is_visible():
+                locator.first.fill(target)
+                page.keyboard.press("Enter")
+                typed = True
+                page.wait_for_timeout(600)
+                break
+        if not typed:
+            raise RuntimeError(
+                f"Could not click '{target}' in the Tekmetric label list on RO#{ro_number}"
+            )
+    page.wait_for_timeout(900)
+    dismiss_tekmetric_pendo(page)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    if header_shows_label(page, target):
+        return
+    page.reload(wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(1200)
+    dismiss_tekmetric_pendo(page)
+    if not header_shows_label(page, target):
+        raise RuntimeError(
+            f"Clicked '{target}' but Tekmetric still does not show that label on RO#{ro_number}"
+        )
+
+
+def sync_tekmetric_label_jobs(context, config: Config) -> int:
+    """Claim dashboard Verify label jobs and apply them in signed-in Tekmetric."""
+    try:
+        jobs = claim_tekmetric_label_jobs(config)
+    except Exception as exc:
+        log(f"Could not claim Tekmetric label jobs: {exc}")
+        return 0
+    if not jobs:
+        return 0
+    page = context.new_page()
+    applied = 0
+    try:
+        for job in jobs:
+            if not isinstance(job, dict):
+                continue
+            job_id = job.get("id")
+            ro_number = job.get("roNumber") or ""
+            target = resolve_verify_label(str(job.get("targetLabel") or ""))
+            try:
+                log(f"Setting Tekmetric label on RO#{ro_number} to {target}")
+                apply_tekmetric_ro_label(page, job)
+                ack_tekmetric_label_job(config, job_id, "done")
+                applied += 1
+            except NeedsSignInError:
+                try:
+                    ack_tekmetric_label_job(
+                        config, job_id, "retry",
+                        "Tekmetric needs sign-in on the shop PC.",
+                    )
+                except Exception:
+                    pass
+                raise
+            except Exception as job_exc:
+                log(f"Tekmetric label job for RO#{ro_number} failed: {job_exc}")
+                try:
+                    ack_tekmetric_label_job(config, job_id, "failed", str(job_exc)[:500])
+                except Exception as ack_exc:
+                    log(f"Could not report Tekmetric label failure for RO#{ro_number}: {ack_exc}")
+        return applied
+    finally:
+        if not page.is_closed():
+            page.close()
+
+
 def sync_job_board(context, config: Config, run_ticket_audit: bool = False) -> int:
     page = context.new_page()
     collected: dict[str, dict] = {}
@@ -2902,6 +3167,15 @@ def run(config: Config) -> None:
                     cycle_attention = (status_for_site(schedule_signin_exc.site), str(schedule_signin_exc))
                 except Exception as manual_schedule_exc:
                     log(f"Manual schedule snapshot failed: {manual_schedule_exc}")
+                try:
+                    label_done = sync_tekmetric_label_jobs(context, config)
+                    if label_done:
+                        log(f"Applied Tekmetric Verify labels on {label_done} repair orders")
+                except NeedsSignInError as label_signin_exc:
+                    log(f"Tekmetric label sync needs sign-in: {label_signin_exc}")
+                    cycle_attention = (status_for_site(label_signin_exc.site), str(label_signin_exc))
+                except Exception as label_exc:
+                    log(f"Tekmetric label sync failed: {label_exc}")
                 report_due = (
                     last_full_report_sync is None
                     or datetime.now(timezone.utc) - last_full_report_sync

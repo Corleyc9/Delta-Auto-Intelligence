@@ -23,4 +23,28 @@ export const roVerificationCycles = sqliteTable("ro_verification_cycles", {
   verifiedBy: text("verified_by"),
   verificationNote: text("verification_note").notNull().default(""),
   lastSeenAt: text("last_seen_at").notNull(),
+  tekmetricLabelStatus: text("tekmetric_label_status").notNull().default(""),
+  tekmetricLabelTarget: text("tekmetric_label_target").notNull().default(""),
+  tekmetricLabelError: text("tekmetric_label_error").notNull().default(""),
+  tekmetricLabelUpdatedAt: text("tekmetric_label_updated_at"),
+  tekmetricLabelJobId: integer("tekmetric_label_job_id"),
 }, (table) => [index("ro_verification_status_idx").on(table.status, table.diagnosedAt)]);
+
+export const tekmetricLabelJobs = sqliteTable("tekmetric_label_jobs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  roNumber: text("ro_number").notNull(),
+  verificationId: integer("verification_id"),
+  targetLabel: text("target_label").notNull(),
+  currentLabel: text("current_label").notNull().default(""),
+  detailUrl: text("detail_url").notNull().default(""),
+  status: text("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  claimedAt: text("claimed_at"),
+  completedAt: text("completed_at"),
+  lastError: text("last_error").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  index("tekmetric_label_jobs_status_idx").on(table.status, table.createdAt),
+  index("tekmetric_label_jobs_ro_idx").on(table.roNumber, table.createdAt),
+]);

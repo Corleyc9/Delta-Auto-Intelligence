@@ -61,7 +61,7 @@ test("requireD1 explains a missing Sites→Worker binding", () => {
 test("ensureSchema creates reader write tables on an empty database", async () => {
   const { sqlite, d1 } = asD1();
   await ensureSchema(d1);
-  for (const table of ["shop_snapshots", "reader_status", "schedule_snapshots", "schedule_capture_request"]) {
+  for (const table of ["shop_snapshots", "reader_status", "schedule_snapshots", "schedule_capture_request", "tekmetric_label_jobs", "ro_verification_cycles"]) {
     assert.ok(columnNames(sqlite, table).length > 0, table);
   }
   await d1.prepare(`
@@ -83,6 +83,34 @@ test("ensureSchema creates reader write tables on an empty database", async () =
   ).first();
   assert.equal(status.status, "ok");
   assert.equal(status.build_hash, "bef75f17f257");
+});
+
+test("ensureSchema adds Tekmetric label columns on an existing verification table", async () => {
+  const { sqlite, d1 } = asD1();
+  sqlite.exec(`
+    CREATE TABLE ro_verification_cycles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ro_number TEXT NOT NULL,
+      customer TEXT NOT NULL,
+      vehicle TEXT NOT NULL,
+      service_writer TEXT NOT NULL,
+      detail_url TEXT NOT NULL DEFAULT '',
+      amount REAL NOT NULL DEFAULT 0,
+      section TEXT NOT NULL,
+      diagnosed_at TEXT NOT NULL,
+      verify_label_seen_at TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      verified_at TEXT,
+      verified_by TEXT,
+      verification_note TEXT NOT NULL DEFAULT '',
+      last_seen_at TEXT NOT NULL
+    );
+  `);
+  await ensureSchema(d1);
+  const columns = columnNames(sqlite, "ro_verification_cycles");
+  assert.ok(columns.includes("tekmetric_label_status"));
+  assert.ok(columns.includes("tekmetric_label_target"));
+  assert.ok(columnNames(sqlite, "tekmetric_label_jobs").includes("target_label"));
 });
 
 test("ensureSchema adds missing version columns on a Sites-era reader_status table", async () => {
