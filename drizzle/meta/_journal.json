@@ -22,6 +22,13 @@
       "when": 1757949800000,
       "tag": "0002_tekmetric_webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1758460000000,
+      "tag": "0003_tekmetric_label_jobs",
+      "breakpoints": true
     }
   ]
 }

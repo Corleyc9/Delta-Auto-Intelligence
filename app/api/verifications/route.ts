@@ -1,4 +1,5 @@
 import { requireApiUser } from "@/app/chatgpt-auth";
+import { enqueueTekmetricVerifyLabelJob, resolveTekmetricVerifyLabel } from "@/app/lib/tekmetric-verify-label";
 import { ensureSchema } from "@/db/ensure-schema";
 import { runtimeEnv } from "@/app/lib/runtime";
 
@@ -13,6 +14,10 @@ function record(row: Record<string, unknown>) {
     status: String(row.status), verifiedAt: row.verified_at ? String(row.verified_at) : null,
     verifiedBy: row.verified_by ? String(row.verified_by) : null,
     verificationNote: String(row.verification_note || ""), lastSeenAt: String(row.last_seen_at),
+    tekmetricLabelStatus: String(row.tekmetric_label_status || ""),
+    tekmetricLabelTarget: String(row.tekmetric_label_target || ""),
+    tekmetricLabelError: String(row.tekmetric_label_error || ""),
+    tekmetricLabelUpdatedAt: row.tekmetric_label_updated_at ? String(row.tekmetric_label_updated_at) : null,
   };
 }
 
@@ -45,5 +50,21 @@ export async function PATCH(request: Request) {
   if (!result.meta.changes) return Response.json({ error: "This RO was already verified or could not be found." }, { status: 409 });
   const row = await env.DB.prepare("SELECT * FROM ro_verification_cycles WHERE id = ?")
     .bind(id).first<Record<string, unknown>>();
-  return Response.json({ ok: true, record: row ? record(row) : null });
+  if (row) {
+    try {
+      await enqueueTekmetricVerifyLabelJob(env.DB, {
+        verificationId: id,
+        roNumber: String(row.ro_number || ""),
+        detailUrl: String(row.detail_url || ""),
+        targetLabel: resolveTekmetricVerifyLabel(env),
+        nowIso: verifiedAt,
+      });
+    } catch {
+      // Dashboard Verify still succeeds if the shop reader is offline or
+      // the label job cannot be stored. Status stays empty until a later retry.
+    }
+  }
+  const refreshed = await env.DB.prepare("SELECT * FROM ro_verification_cycles WHERE id = ?")
+    .bind(id).first<Record<string, unknown>>();
+  return Response.json({ ok: true, record: refreshed ? record(refreshed) : (row ? record(row) : null) });
 }

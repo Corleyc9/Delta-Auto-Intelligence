@@ -49,6 +49,19 @@ export default function VerifyQueueView() {
                   <div className="verify-status">
                     <span>{item.status === "verified" ? "VERIFIED" : "REQUIRED"}</span>
                     <small>{item.verifyLabelSeenAt ? "Verify label seen" : "Verify label missing"}</small>
+                    {item.status === "verified" && (
+                      <small className={`tekmetric-label-sync ${item.tekmetricLabelStatus || "idle"}`}>
+                        {item.tekmetricLabelStatus === "synced"
+                          ? `Tekmetric: ${item.tekmetricLabelTarget || "Verified/Send Estimate"}`
+                          : item.tekmetricLabelStatus === "failed"
+                            ? `Tekmetric label failed${item.tekmetricLabelError ? `: ${item.tekmetricLabelError}` : ""}`
+                            : item.tekmetricLabelStatus === "claimed"
+                              ? "Tekmetric label: applying…"
+                              : item.tekmetricLabelStatus === "pending"
+                                ? "Tekmetric label: waiting for shop reader"
+                                : "Tekmetric label: not queued"}
+                      </small>
+                    )}
                   </div>
                   <div className="verify-main">
                     <a href={item.detailUrl || undefined} target="_blank" rel="noreferrer">RO#{item.roNumber}</a>

@@ -57,6 +57,7 @@ Configure these on the Worker. Never commit values.
 | `TEKMETRIC_WEBHOOK_PATH_TOKEN` | Unguessable path segment for the Custom Integration URL (`/api/webhooks/tekmetric/<token>`). Generate with `openssl rand -hex 32`. |
 | `TEKMETRIC_WEBHOOK_SECRET` | Optional shared secret. Put it in the webhook URL as `?secret=...` (Tekmetric’s Custom Integration UI is name + URL + event checkboxes; it does not document HMAC). Also accepted as `X-Tekmetric-Webhook-Secret`, `Authorization: Bearer`, or HMAC-SHA256 if a signature header is ever sent. |
 | `TEKMETRIC_SHOP_ID` | Optional. Defaults to `4326`. Events with a different shop id are stored but do not change shop signals. |
+| `TEKMETRIC_VERIFY_LABEL` | Optional. Exact Tekmetric Job Board label applied after dashboard **Verified**. Defaults to `Verified/Send Estimate` (slash, no spaces — confirmed on Devin’s teach demo). Set this only if the live chip text ever changes. |
 
 Logical bindings in `wrangler.toml` and `.openai/hosting.json`: `d1` = `DB`, `r2` = `BUCKET`. This rebuild does not reuse the previous Sites `project_id`.
 
@@ -97,6 +98,17 @@ The left rail keeps **Overview**, **Verify**, and **Board** in sight. Lot Walk, 
 **This month** is hidden until the reader captures a real monthly range. The picker is Today / this week / last week only. Sample monthly numbers are not shown as if they were live.
 
 **Ask GM backup** stays in the header. Tekmetric Custom Integration webhook paths are unchanged. Do not invent a Tekmetric API. Webhooks and the shop PC reader remain the only live data paths.
+
+## Verify → Tekmetric label
+
+Dashboard **Verified** still saves immediately (including when the shop PC is offline). It also enqueues a durable job keyed by RO# so the Windows reader can change that RO’s Tekmetric Job Board label on the next loop.
+
+- **Default label string:** `Verified/Send Estimate` (slash, no spaces — confirmed on Devin’s Job Board dropdown teach demo; orange/red chip). Incoming tags `Verify`, `Verify Parts&Labor`, and `Verify Parts/Labor` still mean *needs review* and are not written back.
+- **Override:** Worker env/secret `TEKMETRIC_VERIFY_LABEL` (no code change). Leave unset unless the live chip text ever changes.
+- **UI:** Verify history shows Tekmetric label **waiting for shop reader** / **applying** / the applied name / **failed** plus the reader error.
+- **Behavior:** the shop reader uses the signed-in Chrome profile on **Job Board ACTIVE column view** (`shop 4326`). It opens the status/label dropdown **on the RO card** and selects `Verified/Send Estimate`, replacing e.g. In-Progress. RO deep links look like `/admin/shop/4326/repair-orders/{internalId}` and are a fallback only; a session-expired redirect becomes Needs Attention, not a burned job. No Tekmetric password is stored on the Worker.
+
+After deploy, reinstall the reader ZIP from the dashboard so the shop PC loop actually claims these jobs.
 
 ## Tekmetric Custom Integration (webhooks)
 
@@ -177,6 +189,7 @@ The Windows reader is **still required** for:
 - Steer Opportunity Hub
 - NAPA warranty invoice matching
 - Hourly schedule screenshots and lot-walk video
+- Applying the **Verified/Send Estimate** label after a dashboard Verify click (no Tekmetric write API)
 - Anything Tekmetric does not put in the webhook body
 
 Do not turn off the shop PC reader after enabling webhooks.

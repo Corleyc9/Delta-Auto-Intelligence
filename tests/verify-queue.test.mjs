@@ -83,6 +83,8 @@ test("marking verified with an empty note keeps the RO in history", async () => 
   assert.equal(row.status, "verified");
   assert.equal(row.verified_by, verifiedBy);
   assert.equal(row.verification_note, "");
+  const columns = sqlite.prepare("PRAGMA table_info(ro_verification_cycles)").all().map((item) => item.name);
+  assert.ok(columns.includes("tekmetric_label_status"));
   const second = await d1.prepare(`UPDATE ro_verification_cycles SET
     status = 'verified', verified_at = ?, verified_by = ?, verification_note = ?
     WHERE id = ? AND status = 'pending'`).bind(verifiedAt, verifiedBy, "late note", id).run();

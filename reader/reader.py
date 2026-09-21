@@ -40,6 +40,15 @@ from config import (
 from numeric import currency, number
 from parsers.job_board import job_category, parse_age_days, parse_job_card
 from parsers.steer import classify_customer, parse_steer_row
+from parsers.tekmetric_label import (
+    DEFAULT_TEKMETRIC_VERIFY_LABEL,
+    is_repair_order_detail_url,
+    is_tekmetric_signin_url,
+    label_click_candidates,
+    labels_match,
+    repair_order_page_url,
+    resolve_verify_label,
+)
 from version import READER_BUILD_HASH, READER_REVISION, READER_VERSION
 
 HTTP = requests.Session()
@@ -935,6 +944,46 @@ def post_vehicle_history(config: Config, payload: dict) -> None:
         timeout=120,
     )
     response.raise_for_status()
+
+
+def claim_tekmetric_label_jobs(config: Config) -> list[dict]:
+    response = HTTP.post(
+        f"{config.dashboard_url}/api/tekmetric-label-jobs",
+        json={"action": "claim", "limit": 4},
+        headers={
+            "x-reader-key": config.reader_api_key,
+            "OAI-Sites-Authorization": f"Bearer {config.sites_machine_token}",
+        },
+        timeout=30,
+    )
+    if response.status_code == 401:
+        raise RuntimeError("Dashboard rejected the reader key for Tekmetric label jobs.")
+    response.raise_for_status()
+    payload = response.json()
+    jobs = payload.get("jobs") if isinstance(payload, dict) else None
+    return jobs if isinstance(jobs, list) else []
+
+
+def ack_tekmetric_label_job(config: Config, job_id: object, status: str, error: str = "") -> None:
+    response = HTTP.post(
+        f"{config.dashboard_url}/api/tekmetric-label-jobs",
+        json={
+            "action": "ack",
+            "id": job_id,
+            "status": status,
+            "error": str(error or "")[:500],
+        },
+        headers={
+            "x-reader-key": config.reader_api_key,
+            "OAI-Sites-Authorization": f"Bearer {config.sites_machine_token}",
+        },
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"Dashboard rejected Tekmetric label ack ({response.status_code}): "
+            f"{response.text[:300]}"
+        )
 
 
 def history_progress() -> dict:
@@ -2493,6 +2542,499 @@ def sync_delta_ai_estimates(context, config: Config, repair_orders: list[dict]) 
         page.close()
 
 
+_MARK_JOB_BOARD_COLUMNS_JS = """() => {
+  document.querySelectorAll("[data-reader-job-column]")
+    .forEach(el => el.removeAttribute("data-reader-job-column"));
+  const links = Array.from(document.querySelectorAll("a,button,div,span"))
+    .filter(el => /^RO#\\d+$/.test((el.textContent || "").trim()));
+  const panes = [];
+  for (const link of links) {
+    let node = link.parentElement;
+    while (node && node !== document.body) {
+      const rect = node.getBoundingClientRect();
+      if (node.scrollHeight > node.clientHeight + 60 &&
+          node.clientHeight > 250 && rect.width > 250 && rect.width < 800) {
+        if (!panes.includes(node)) panes.push(node);
+        break;
+      }
+      node = node.parentElement;
+    }
+  }
+  const distinct = panes
+    .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x)
+    .filter((pane, index, all) => index === 0 ||
+      Math.abs(pane.getBoundingClientRect().x -
+        all[index - 1].getBoundingClientRect().x) > 100);
+  distinct.slice(0, 3).forEach((el, index) =>
+    el.setAttribute("data-reader-job-column", String(index)));
+  return distinct.length;
+}"""
+
+_MARK_RO_CARD_JS = """(roNumber) => {
+  document.querySelectorAll('[data-reader-ro-card]')
+    .forEach(el => el.removeAttribute('data-reader-ro-card'));
+  const wanted = 'RO#' + String(roNumber || '').trim();
+  const links = Array.from(document.querySelectorAll('a,button,div,span'))
+    .filter(el => (el.textContent || '').trim() === wanted);
+  for (const link of links) {
+    let card = link;
+    while (card.parentElement) {
+      const parent = card.parentElement;
+      const text = parent.innerText || '';
+      if (text.length > 1600) break;
+      card = parent;
+      const ros = text.match(/RO#\\d+/g) || [];
+      if (ros.length === 1 && /Created\\s+\\d+\\s*[mhdM]\\s+ago/.test(text) &&
+          /\\(\\d{3}\\)\\s*\\d{3}-\\d{4}/.test(text)) break;
+    }
+    const r = card.getBoundingClientRect();
+    if (r.width < 40 || r.height < 40) continue;
+    card.setAttribute('data-reader-ro-card', String(roNumber));
+    try { card.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (_) {}
+    return true;
+  }
+  return false;
+}"""
+
+_OPEN_CARD_LABEL_JS = """(args) => {
+  document.querySelectorAll('[data-reader-label-opener]')
+    .forEach(el => el.removeAttribute('data-reader-label-opener'));
+  const card = document.querySelector('[data-reader-ro-card]');
+  if (!card) return { found: false };
+  const known = new Set((args.knownLabels || [])
+    .map(s => String(s).replace(/\\s+/g, ' ').trim().toLowerCase()));
+  const current = String(args.currentLabel || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const target = String(args.targetLabel || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const nodes = Array.from(card.querySelectorAll(
+    'button, [role="button"], [role="combobox"], [aria-haspopup], span, div, a, select'
+  ));
+  const candidates = [];
+  for (const el of nodes) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) continue;
+    const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (!text || text.length > 64) continue;
+    const lower = text.toLowerCase();
+    if (!known.has(lower)) continue;
+    let score = 10;
+    if (current && lower === current) score = 50;
+    else if (lower !== target) score = 30;
+    else score = 5;
+    score += Math.max(0, 20 - Math.min(text.length, 20));
+    candidates.push({ el, score, text });
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  if (!candidates.length) return { found: false };
+  candidates[0].el.setAttribute('data-reader-label-opener', 'true');
+  return { found: true, text: candidates[0].text };
+}"""
+
+_MARK_MENU_OPTION_JS = """(target) => {
+  document.querySelectorAll('[data-reader-label-option]')
+    .forEach(el => el.removeAttribute('data-reader-label-option'));
+  const wanted = String(target || '').replace(/\\s+/g, ' ').trim();
+  if (!wanted) return { found: false };
+  const card = document.querySelector('[data-reader-ro-card]');
+  const nodes = Array.from(document.querySelectorAll(
+    '[role="option"], [role="menuitem"], li, button, [role="button"], span, div'
+  )).filter(el => {
+    const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (text !== wanted) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 8 && r.height > 8;
+  });
+  const menuish = nodes.filter(el => {
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    const inMenu = el.closest('[role="listbox"], [role="menu"], [role="dialog"], ul');
+    return role === 'option' || role === 'menuitem' || Boolean(inMenu);
+  });
+  const outsideCard = nodes.filter(el => !card || !card.contains(el));
+  const pick = (menuish.length ? menuish[menuish.length - 1] : null)
+    || (outsideCard.length ? outsideCard[outsideCard.length - 1] : null)
+    || (nodes.length ? nodes[nodes.length - 1] : null);
+  if (!pick) return { found: false };
+  pick.setAttribute('data-reader-label-option', 'true');
+  return { found: true };
+}"""
+
+_CARD_HAS_LABEL_JS = """(label) => {
+  const card = document.querySelector('[data-reader-ro-card]');
+  if (!card) return false;
+  const wanted = String(label || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const lines = (card.innerText || '').split(/\\n/)
+    .map(s => s.replace(/\\s+/g, ' ').trim().toLowerCase())
+    .filter(Boolean);
+  return lines.includes(wanted);
+}"""
+
+_HEADER_LABEL_JS = """(label) => {
+  const wanted = String(label || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  if (!wanted) return false;
+  const nodes = Array.from(document.querySelectorAll(
+    'button, [role="button"], [role="combobox"], [aria-haspopup], span, div, a, select'
+  ));
+  for (const el of nodes) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8 || r.top < 0 || r.top > 280) continue;
+    const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    if (text === wanted) return true;
+  }
+  return false;
+}"""
+
+_OPEN_LABEL_PICKER_JS = """(args) => {
+  document.querySelectorAll('[data-reader-label-opener]')
+    .forEach(el => el.removeAttribute('data-reader-label-opener'));
+  const known = new Set((args.knownLabels || [])
+    .map(s => String(s).replace(/\\s+/g, ' ').trim().toLowerCase()));
+  const current = String(args.currentLabel || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const target = String(args.targetLabel || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const candidates = [];
+  const nodes = Array.from(document.querySelectorAll(
+    'button, [role="button"], [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], select, a, span, div'
+  ));
+  for (const el of nodes) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 10 || r.height < 10 || r.top < 0 || r.top > 280) continue;
+    const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (!text || text.length > 64) continue;
+    const lower = text.toLowerCase();
+    const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+    let score = 0;
+    if (current && lower === current) score = 50;
+    else if (known.has(lower) && lower !== target) score = 30;
+    else if (aria.includes('label') || aria.includes('tag')) score = 20;
+    else continue;
+    score += Math.max(0, 20 - Math.min(text.length, 20));
+    candidates.push({ el, score, text, top: r.top });
+  }
+  candidates.sort((a, b) => b.score - a.score || a.top - b.top);
+  if (!candidates.length) return { found: false };
+  candidates[0].el.setAttribute('data-reader-label-opener', 'true');
+  return { found: true, text: candidates[0].text };
+}"""
+
+
+def raise_if_tekmetric_signin(page: Page, detail: str = "") -> None:
+    url = page.url or ""
+    if is_tekmetric_signin_url(url) or "shop.tekmetric.com" not in url:
+        raise NeedsSignInError(
+            "Tekmetric",
+            detail or "Tekmetric sent the shop PC to sign-in. Sign back in on the open Chrome window.",
+        )
+    try:
+        body = page.locator("body").inner_text()[:2500]
+    except Exception:
+        body = ""
+    if re.search(r"session expired|your session has expired|sign in to continue", body, re.I):
+        raise NeedsSignInError(
+            "Tekmetric",
+            "Tekmetric session expired. Sign back in on the shop PC.",
+        )
+
+
+def header_shows_label(page: Page, target: str) -> bool:
+    return any(page.evaluate(_HEADER_LABEL_JS, candidate) for candidate in label_click_candidates(target))
+
+
+def card_shows_label(page: Page, target: str) -> bool:
+    return any(page.evaluate(_CARD_HAS_LABEL_JS, candidate) for candidate in label_click_candidates(target))
+
+
+def try_native_label_select(page: Page, target: str) -> bool:
+    selects = page.locator("select")
+    for index in range(min(selects.count(), 12)):
+        select = selects.nth(index)
+        try:
+            if not select.is_visible():
+                continue
+            option_texts = select.locator("option").evaluate_all(
+                "opts => opts.map(o => (o.textContent || '').trim())"
+            )
+            match = next((item for item in option_texts if labels_match(item, target)), None)
+            if match:
+                select.select_option(label=match)
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def click_dropdown_label_option(page: Page, target: str) -> bool:
+    """Click Verified/Send Estimate in the open dropdown, not a chip on another card."""
+    for candidate in label_click_candidates(target):
+        marked = page.evaluate(_MARK_MENU_OPTION_JS, candidate)
+        if marked and marked.get("found"):
+            option = page.locator("[data-reader-label-option]").first
+            if option.count():
+                option.click(force=True)
+                return True
+        if visible_text_exists(page, candidate):
+            click_visible_text(page, candidate)
+            return True
+    return False
+
+
+def click_label_option(page: Page, target: str) -> bool:
+    if click_dropdown_label_option(page, target):
+        return True
+    spaced = re.sub(r"[\s/]+", r"[\\s/]+", re.escape(target))
+    loc = page.get_by_text(re.compile(rf"^\s*{spaced}\s*$", re.I))
+    for index in range(loc.count() - 1, -1, -1):
+        item = loc.nth(index)
+        if item.is_visible():
+            item.click()
+            return True
+    return False
+
+
+def open_tekmetric_job_board(page: Page) -> None:
+    """Job Board ACTIVE column view — the path in Devin's teach demo."""
+    already = (
+        "repair-orders" in (page.url or "")
+        and "board=ACTIVE" in (page.url or "")
+        and page.get_by_text("Job Board", exact=True).count() > 0
+    )
+    if not already:
+        page.goto(JOB_BOARD_URL, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(2500)
+    dismiss_tekmetric_pendo(page)
+    raise_if_tekmetric_signin(page, "Tekmetric Job Board needs sign-in on the shop PC.")
+    if page.get_by_text("Job Board", exact=True).count() == 0:
+        shop = page.get_by_text("Delta Auto", exact=True)
+        for index in range(shop.count()):
+            if shop.nth(index).is_visible():
+                shop.nth(index).click()
+                page.wait_for_timeout(1000)
+                page.goto(JOB_BOARD_URL, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(2500)
+                dismiss_tekmetric_pendo(page)
+                break
+    raise_if_tekmetric_signin(page, "Tekmetric Job Board needs sign-in on the shop PC.")
+    if page.get_by_text("Job Board", exact=True).count() == 0:
+        raise RuntimeError("Tekmetric's Job Board could not be opened.")
+    page.evaluate(_MARK_JOB_BOARD_COLUMNS_JS)
+
+
+def find_job_board_ro_card(page: Page, ro_number: str) -> bool:
+    if page.evaluate(_MARK_RO_CARD_JS, ro_number):
+        return True
+    columns = page.locator("[data-reader-job-column]")
+    for column_index in range(columns.count()):
+        column = columns.nth(column_index)
+        column.evaluate("(el) => el.scrollTop = 0")
+        page.wait_for_timeout(200)
+        while True:
+            if page.evaluate(_MARK_RO_CARD_JS, ro_number):
+                return True
+            before = column.evaluate("(el) => el.scrollTop")
+            column.evaluate("(el) => el.scrollTop += Math.max(el.clientHeight * .8, 350)")
+            page.wait_for_timeout(280)
+            after = column.evaluate("(el) => el.scrollTop")
+            at_bottom = column.evaluate(
+                "(el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 5"
+            )
+            if at_bottom or after == before:
+                if page.evaluate(_MARK_RO_CARD_JS, ro_number):
+                    return True
+                break
+    return bool(page.evaluate(_MARK_RO_CARD_JS, ro_number))
+
+
+def apply_via_job_board_card(page: Page, job: dict, target: str) -> None:
+    """Demo flow: ACTIVE Job Board → RO card dropdown → Verified/Send Estimate."""
+    ro_number = str(job.get("roNumber") or "")
+    current = str(job.get("currentLabel") or "")
+    open_tekmetric_job_board(page)
+    if not find_job_board_ro_card(page, ro_number):
+        raise RuntimeError(f"RO#{ro_number} was not visible on the ACTIVE Job Board")
+    page.wait_for_timeout(250)
+    if card_shows_label(page, target):
+        return
+    opened = page.evaluate(_OPEN_CARD_LABEL_JS, {
+        "knownLabels": list(JOB_BOARD_LABELS),
+        "currentLabel": current,
+        "targetLabel": target,
+    })
+    if not (opened and opened.get("found")):
+        if current and visible_text_exists(page, current):
+            click_visible_text(page, current)
+        else:
+            raise RuntimeError(
+                f"Could not find the status/label dropdown on the Job Board card for RO#{ro_number}"
+            )
+    else:
+        opener = page.locator("[data-reader-label-opener]").first
+        opener.click(force=True)
+    page.wait_for_timeout(450)
+    if not click_dropdown_label_option(page, target):
+        raise RuntimeError(
+            f"Could not select '{target}' from the Job Board label dropdown on RO#{ro_number}"
+        )
+    page.wait_for_timeout(900)
+    dismiss_tekmetric_pendo(page)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(250)
+    if not page.evaluate(_MARK_RO_CARD_JS, ro_number):
+        find_job_board_ro_card(page, ro_number)
+    if not card_shows_label(page, target):
+        raise RuntimeError(
+            f"Clicked '{target}' but the Job Board card for RO#{ro_number} still does not show that label"
+        )
+
+
+def apply_via_repair_order_page(page: Page, job: dict, target: str) -> None:
+    current = str(job.get("currentLabel") or "")
+    ro_number = str(job.get("roNumber") or "")
+    url = repair_order_page_url(str(job.get("detailUrl") or ""))
+    if not is_repair_order_detail_url(url):
+        raise RuntimeError(
+            f"RO#{ro_number} has no Tekmetric repair-order deep link "
+            "(ids are internal, not the RO number)"
+        )
+    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(1600)
+    dismiss_tekmetric_pendo(page)
+    raise_if_tekmetric_signin(
+        page,
+        "Tekmetric asked for sign-in before the repair order opened.",
+    )
+    if header_shows_label(page, target):
+        return
+    if try_native_label_select(page, target):
+        page.wait_for_timeout(800)
+        if header_shows_label(page, target):
+            return
+    opened = page.evaluate(_OPEN_LABEL_PICKER_JS, {
+        "knownLabels": list(JOB_BOARD_LABELS),
+        "currentLabel": current,
+        "targetLabel": target,
+    })
+    if opened and opened.get("found"):
+        opener = page.locator("[data-reader-label-opener]").first
+        if opener.count():
+            opener.click(force=True)
+            page.wait_for_timeout(450)
+    elif current and visible_text_exists(page, current):
+        click_visible_text(page, current)
+        page.wait_for_timeout(450)
+    else:
+        combo = page.get_by_role("combobox")
+        clicked = False
+        for index in range(combo.count()):
+            item = combo.nth(index)
+            if item.is_visible():
+                item.click()
+                clicked = True
+                page.wait_for_timeout(450)
+                break
+        if not clicked:
+            raise RuntimeError(f"Could not find the Tekmetric label control on RO#{ro_number}")
+    if not click_label_option(page, target):
+        typed = False
+        for locator in (
+            page.locator("input[type='search']"),
+            page.locator("[role='listbox'] input"),
+            page.locator("input[type='text']"),
+        ):
+            if locator.count() and locator.first.is_visible():
+                locator.first.fill(target)
+                page.keyboard.press("Enter")
+                typed = True
+                page.wait_for_timeout(600)
+                break
+        if not typed:
+            raise RuntimeError(
+                f"Could not click '{target}' in the Tekmetric label list on RO#{ro_number}"
+            )
+    page.wait_for_timeout(900)
+    dismiss_tekmetric_pendo(page)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    if header_shows_label(page, target):
+        return
+    page.reload(wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(1200)
+    dismiss_tekmetric_pendo(page)
+    raise_if_tekmetric_signin(page)
+    if not header_shows_label(page, target):
+        raise RuntimeError(
+            f"Clicked '{target}' but Tekmetric still does not show that label on RO#{ro_number}"
+        )
+
+
+def apply_tekmetric_ro_label(page: Page, job: dict) -> None:
+    """Set this RO's Job Board label to Verified/Send Estimate.
+
+    Primary path matches Devin's demo: Job Board ACTIVE column view, open the
+    status dropdown on the RO card, select the exact chip text. Tekmetric
+    labels are a single chip; the new option replaces e.g. In-Progress.
+    """
+    target = resolve_verify_label(str(job.get("targetLabel") or "")) or DEFAULT_TEKMETRIC_VERIFY_LABEL
+    board_error: Exception | None = None
+    try:
+        apply_via_job_board_card(page, job, target)
+        return
+    except NeedsSignInError:
+        raise
+    except Exception as exc:
+        board_error = exc
+        log(f"Job Board label click for RO#{job.get('roNumber')} did not finish: {exc}")
+    try:
+        apply_via_repair_order_page(page, job, target)
+    except NeedsSignInError:
+        raise
+    except Exception as page_error:
+        detail = str(board_error or page_error)
+        raise RuntimeError(
+            f"Could not set '{target}' on RO#{job.get('roNumber')}: {detail}"
+        ) from page_error
+
+
+def sync_tekmetric_label_jobs(context, config: Config) -> int:
+    """Claim dashboard Verify label jobs and apply them in signed-in Tekmetric."""
+    try:
+        jobs = claim_tekmetric_label_jobs(config)
+    except Exception as exc:
+        log(f"Could not claim Tekmetric label jobs: {exc}")
+        return 0
+    if not jobs:
+        return 0
+    page = context.new_page()
+    applied = 0
+    try:
+        for job in jobs:
+            if not isinstance(job, dict):
+                continue
+            job_id = job.get("id")
+            ro_number = job.get("roNumber") or ""
+            target = resolve_verify_label(str(job.get("targetLabel") or ""))
+            try:
+                log(f"Setting Tekmetric label on RO#{ro_number} to {target}")
+                apply_tekmetric_ro_label(page, job)
+                ack_tekmetric_label_job(config, job_id, "done")
+                applied += 1
+            except NeedsSignInError:
+                try:
+                    ack_tekmetric_label_job(
+                        config, job_id, "retry",
+                        "Tekmetric needs sign-in on the shop PC.",
+                    )
+                except Exception:
+                    pass
+                raise
+            except Exception as job_exc:
+                log(f"Tekmetric label job for RO#{ro_number} failed: {job_exc}")
+                try:
+                    ack_tekmetric_label_job(config, job_id, "failed", str(job_exc)[:500])
+                except Exception as ack_exc:
+                    log(f"Could not report Tekmetric label failure for RO#{ro_number}: {ack_exc}")
+        return applied
+    finally:
+        if not page.is_closed():
+            page.close()
+
+
 def sync_job_board(context, config: Config, run_ticket_audit: bool = False) -> int:
     page = context.new_page()
     collected: dict[str, dict] = {}
@@ -2902,6 +3444,15 @@ def run(config: Config) -> None:
                     cycle_attention = (status_for_site(schedule_signin_exc.site), str(schedule_signin_exc))
                 except Exception as manual_schedule_exc:
                     log(f"Manual schedule snapshot failed: {manual_schedule_exc}")
+                try:
+                    label_done = sync_tekmetric_label_jobs(context, config)
+                    if label_done:
+                        log(f"Applied Tekmetric Verify labels on {label_done} repair orders")
+                except NeedsSignInError as label_signin_exc:
+                    log(f"Tekmetric label sync needs sign-in: {label_signin_exc}")
+                    cycle_attention = (status_for_site(label_signin_exc.site), str(label_signin_exc))
+                except Exception as label_exc:
+                    log(f"Tekmetric label sync failed: {label_exc}")
                 report_due = (
                     last_full_report_sync is None
                     or datetime.now(timezone.utc) - last_full_report_sync

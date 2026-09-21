@@ -250,6 +250,10 @@ export type VerificationRecord = {
   verifiedBy: string | null;
   verificationNote: string;
   lastSeenAt: string;
+  tekmetricLabelStatus: "" | "pending" | "claimed" | "synced" | "failed";
+  tekmetricLabelTarget: string;
+  tekmetricLabelError: string;
+  tekmetricLabelUpdatedAt: string | null;
 };
 
 export type WarrantyClaim = {

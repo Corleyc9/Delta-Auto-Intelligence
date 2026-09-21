@@ -66,6 +66,8 @@ test("Ask GM backup and Tekmetric webhook paths are unchanged", async () => {
   assert.match(readme, /\/api\/webhooks\/tekmetric/);
   assert.match(readme, /Ask GM backup/);
   assert.match(readme, /Do not invent a Tekmetric API/);
+  assert.match(readme, /TEKMETRIC_VERIFY_LABEL/);
+  assert.match(readme, /Verified\/Send Estimate/);
 });
 
 test("README documents slower cadence, overnight history, and hidden screens", async () => {

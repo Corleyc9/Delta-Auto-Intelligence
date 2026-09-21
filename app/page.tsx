@@ -526,7 +526,12 @@ export default function Home() {
         return;
       }
       setVerificationRecords((current) => current.map((item) => item.id === record.id ? payload.record : item));
-      setVerificationMessage(`RO#${record.roNumber} marked verified.`);
+      const labelTarget = payload.record?.tekmetricLabelTarget || "Verified/Send Estimate";
+      const labelQueued = payload.record?.tekmetricLabelStatus === "pending"
+        || payload.record?.tekmetricLabelStatus === "claimed";
+      setVerificationMessage(labelQueued
+        ? `RO#${record.roNumber} marked verified. Tekmetric will switch to “${labelTarget}” on the next shop-reader cycle.`
+        : `RO#${record.roNumber} marked verified.`);
     } catch (error) {
       setVerificationMessageError(true);
       setVerificationMessage(error instanceof Error ? error.message : "The verification could not be saved.");
