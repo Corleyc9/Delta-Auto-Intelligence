@@ -5,6 +5,9 @@ main = "./worker/index.ts"
 compatibility_date = "2026-05-15"
 compatibility_flags = [ "nodejs_compat" ]
 
+workers_dev = true
+preview_urls = true
+
 # Logical D1 binding used by the app (`DB`).
 # This is the D1 database on the Worker account (replacing the ChatGPT Sites placeholder).
 [[d1_databases]]
@@ -20,3 +23,10 @@ bucket_name = "delta-auto-lot-walks"
 
 [images]
 binding = "IMAGES"
+
+[[routes]]
+pattern = "deltaintelligence.cc"
+custom_domain = true
+
+[triggers]
+crons = ["*/15 * * * *"]

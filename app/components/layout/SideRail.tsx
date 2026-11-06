@@ -6,6 +6,7 @@ export const PRIMARY_NAV: Array<[string, string]> = [
   ["Overview", "Overview"],
   ["Verify Queue", "Verify"],
   ["Job Board", "Board"],
+  ["Tech Board", "Tech"],
 ];
 
 export const MORE_NAV: Array<[string, string, string]> = [

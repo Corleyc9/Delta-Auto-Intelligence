@@ -61,7 +61,7 @@ test("pack:reader succeeds when python3 is not on PATH and keeps hashes aligned"
 
   const packed = spawnSync("npm", ["run", "pack:reader"], { cwd: root, env, encoding: "utf8" });
   assert.equal(packed.status, 0, packed.stderr || packed.stdout);
-  assert.match(packed.stdout, /Packed reader 2\.0\.0\+[a-f0-9]{12}/);
+  assert.match(packed.stdout, /Packed reader 2\.1\.\d+\+[a-f0-9]{12}/);
 
   const readerDir = path.join(root, "reader");
   const buildHash = await hashReaderSources(readerDir);

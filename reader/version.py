@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
-READER_VERSION = "2.0.0"
+READER_VERSION = "2.1.3"
 
 
 def _hash_sources() -> str:
