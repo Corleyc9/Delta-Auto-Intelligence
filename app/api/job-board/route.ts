@@ -2,6 +2,7 @@ import { requireApiUser } from "@/app/chatgpt-auth";
 import { isEmptyJobBoard } from "@/app/lib/snapshot-guards";
 import { ensureSchema } from "@/db/ensure-schema";
 import { runtimeEnv } from "@/app/lib/runtime";
+import { initializeTechBoard, recomputeTechBoard, saveTekSchedule } from "@/app/tech-board/store";
 
 type RepairOrder = {
   roNumber: string;
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
   if (!env.READER_API_KEY || request.headers.get("x-reader-key") !== env.READER_API_KEY) {
     return Response.json({ error: "Unauthorized reader" }, { status: 401 });
   }
-  const body = await request.json() as { repairOrders?: Partial<RepairOrder>[]; capturedAt?: string };
+  const body = await request.json() as { repairOrders?: Partial<RepairOrder>[]; capturedAt?: string; appointments?: Record<string, unknown>[] };
   if (!Array.isArray(body.repairOrders)) {
     return Response.json({ error: "Invalid Job Board payload" }, { status: 400 });
   }
@@ -91,6 +92,18 @@ export async function POST(request: Request) {
     balanceDue: Boolean(item.balanceDue),
     customerComplaint: String(item.customerComplaint || "").slice(0, 900),
     detailUrl: String(item.detailUrl || "").slice(0, 1000),
+    // v1.6.19 / reader 2.1.3: the RO's vehicle VIN + year/make/model (Bay Scan matches scans by VIN).
+    vin: /^[A-HJ-NPR-Z0-9]{17}$/.test(String((item as Record<string, unknown>).vin || "").toUpperCase()) ? String((item as Record<string, unknown>).vin).toUpperCase() : "",
+    year: String((item as Record<string, unknown>).year || "").slice(0, 4), make: String((item as Record<string, unknown>).make || "").slice(0, 40),
+    model: String((item as Record<string, unknown>).model || "").slice(0, 80),
+    // Optional job-level detail from the reader: [{ jobId, name, technician, techInitials, hours, order, completed, loggedSeconds }].
+    ...(Array.isArray((item as Record<string, unknown>).jobs) ? { jobs: ((item as Record<string, unknown>).jobs as Record<string, unknown>[]).slice(0, 30).map((job, index) => ({
+      jobId: String(job.jobId ?? job.id ?? index + 1).slice(0, 40), name: String(job.name ?? "").slice(0, 80),
+      techInitials: job.techInitials ? String(job.techInitials).slice(0, 4).toUpperCase() : null,
+      hours: Math.max(0, Number(job.hours) || 0), order: Number(job.order) || index + 1, completed: Boolean(job.completed),
+      technician: job.technician ? String(job.technician).slice(0, 60) : null,
+      authorized: job.authorized === true,
+      loggedSeconds: Number.isFinite(Number(job.loggedSeconds)) && job.loggedSeconds !== null ? Math.max(0, Math.round(Number(job.loggedSeconds))) : null })) } : {}),
   })).filter((item) => item.roNumber && item.customer);
 
   if (isEmptyJobBoard(repairOrders)) {
@@ -179,5 +192,19 @@ export async function POST(request: Request) {
     INSERT INTO job_board_snapshots (repair_orders_json, captured_at)
     VALUES (?, ?)
   `).bind(JSON.stringify(repairOrders), capturedAt).run();
+  // v1.6.8: Tekmetric's schedule (reader 2.1+). Missing = not read this sync → keep the last stored schedule.
+  if (Array.isArray(body.appointments)) {
+    try {
+      await initializeTechBoard(env.DB as never);
+      await saveTekSchedule(env.DB as never, body.appointments.filter((item) => item && item.start && item.end).map((item) => ({
+        id: String(item.id || ""), roNumber: String(item.roNumber || "").replace(/\D/g, ""), employeeId: item.employeeId ? String(item.employeeId) : null,
+        employeeName: item.employeeName ? String(item.employeeName).slice(0, 80) : null, start: String(item.start), end: String(item.end), updated: String(item.updated || ""),
+        color: String(item.color || "").slice(0, 20), customer: String(item.customer || "").slice(0, 80), title: String(item.title || item.description || "").slice(0, 160),
+        details: item.details && typeof item.details === "object" ? JSON.stringify(item.details).slice(0, 4000) : "" }))
+        .filter((item) => item.id));
+    } catch (error) { console.error("tek schedule save failed", error); }
+  }
+  // Tech Board: re-run the auto-scheduler on every sync. Never fail the sync over it.
+  try { await recomputeTechBoard(env.DB as never, repairOrders); } catch (error) { console.error("tech-board recompute failed", error); }
   return Response.json({ ok: true, count: repairOrders.length, capturedAt }, { status: 201 });
 }

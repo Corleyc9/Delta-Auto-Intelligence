@@ -40,6 +40,10 @@ from config import (
 from numeric import currency, number
 from parsers.job_board import job_category, parse_age_days, parse_job_card
 from parsers.steer import classify_customer, parse_steer_row
+from parsers.appointments import parse_appointments
+from parsers.ro_jobs import parse_ro_jobs, repairs_url
+from parsers.tech_board import parse_tech_board, unassigned_summary
+from parsers.vehicle import apply_vehicles, clean_vin, vehicle_from_text, vehicles_from_payloads
 from parsers.tekmetric_label import (
     DEFAULT_TEKMETRIC_VERIFY_LABEL,
     is_repair_order_detail_url,
@@ -798,7 +802,7 @@ def post_service_writers(config: Config, period: str, start_date, end_date, writ
     response.raise_for_status()
 
 
-def post_job_board(config: Config, repair_orders: list[dict]) -> None:
+def post_job_board(config: Config, repair_orders: list[dict], appointments: list[dict] | None = None) -> None:
     if not repair_orders:
         raise RuntimeError(
             "Refusing to post an empty Job Board snapshot so the last valid board is preserved."
@@ -808,6 +812,8 @@ def post_job_board(config: Config, repair_orders: list[dict]) -> None:
         json={
             "repairOrders": repair_orders,
             "capturedAt": datetime.now(timezone.utc).isoformat(),
+            # v1.6.8: Tekmetric's schedule (Day - Employee appointments); None = not read this sync (board keeps the last set).
+            **({"appointments": appointments} if appointments is not None else {}),
         },
         headers={
             "x-reader-key": config.reader_api_key,
@@ -3035,6 +3041,211 @@ def sync_tekmetric_label_jobs(context, config: Config) -> int:
             page.close()
 
 
+RO_JOBS_CACHE = ROOT / "ro-jobs-cache.json"
+RO_JOBS_REFRESH_SECONDS = 15 * 60
+RO_JOBS_MAX_PER_SYNC = 30
+
+
+TECH_BOARD_URL = re.sub(r"/repair-orders.*$", "/tech-board", JOB_BOARD_URL)
+APPOINTMENTS_URL = re.sub(r"/repair-orders.*$", "/appointments?view=day&dayViewResource=EMPLOYEE", JOB_BOARD_URL)
+APPOINTMENT_DAYS = 16  # calendar days → today plus the next ~10 shop days
+
+
+def read_appointments(context) -> list[dict] | None:
+    """Read Tekmetric's schedule (Appointments → Day - Employee) for today plus the next ~10 shop days.
+
+    Read-only: opens the Appointments page, keeps the day-view JSON request it makes, and repeats that same GET
+    (same headers, held in memory only, never logged) for the full date range. Nothing is clicked or changed.
+    """
+    page = context.new_page()
+    try:
+        with page.expect_response(lambda r: r.request.method == "GET" and "/appointments/day-view" in r.url, timeout=60000) as info:
+            page.goto(APPOINTMENTS_URL, wait_until="domcontentloaded", timeout=60000)
+        first = info.value
+        headers = {k: v for k, v in first.request.headers.items() if not k.startswith(":")}
+        base = first.url.split("?")[0]
+        start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=APPOINTMENT_DAYS) - timedelta(seconds=1)
+        from urllib.parse import urlencode
+        query = urlencode({"size": 10000, "dayViewResource": "EMPLOYEE", "view": "day",
+                           "start": start.isoformat(timespec="seconds"), "end": end.isoformat(timespec="seconds")})
+        response = page.request.get(f"{base}?{query}", headers=headers, timeout=60000)
+        if not response.ok:
+            log(f"Tekmetric schedule read failed: HTTP {response.status}")
+            return None
+        appointments = parse_appointments(response.json())
+        log(f"Tekmetric schedule: {len(appointments)} appointments over {APPOINTMENT_DAYS} days")
+        return appointments
+    except Exception as exc:
+        log(f"Tekmetric schedule could not be read: {exc}")
+        return None
+    finally:
+        page.close()
+
+
+def read_tech_board(context) -> dict | None:
+    """Open Tekmetric's Tech Board page (read-only) and keep the tech-board JSON it loads.
+
+    It lists every WIP RO's jobs per tech lane plus the "Unassigned" lane (No Tech Assigned), so the
+    board's open pool matches Tekmetric exactly. Navigation only; nothing is clicked.
+    """
+    page = context.new_page()
+    try:
+        with page.expect_response(lambda r: r.request.method == "GET" and re.search(r"/api/shop/\d+/tech-board$", r.url.split("?")[0]) is not None,
+                                  timeout=60000) as info:
+            page.goto(TECH_BOARD_URL, wait_until="domcontentloaded", timeout=60000)
+        payload = info.value.json()
+        return payload if isinstance(payload, dict) and "technicianBoards" in payload else None
+    except Exception as exc:
+        log(f"Tech Board could not be read: {exc}")
+        return None
+    finally:
+        page.close()
+
+
+RO_VIN_CACHE = ROOT / "ro-vin-cache.json"
+RO_VIN_MAX_PAGES_PER_SYNC = 40
+RO_VIN_RETRY_SECONDS = 60 * 60
+
+
+def attach_ro_vehicles(context, repair_orders: list[dict], appointments: list[dict] | None = None) -> int:
+    """2.1.3: put vin/year/make/model on every job-board RO (Bay Scan matches scans to ROs by VIN).
+
+    Read-only. A VIN never changes on an RO, so it is cached for good. Sources: the appointment JSON and the
+    Tech Board JSON already read this sync, then the RO's own page (same header the warranty reader uses) for
+    any RO still missing one — at most RO_VIN_MAX_PAGES_PER_SYNC pages per sync. Navigation only; nothing is clicked.
+    """
+    try:
+        cache = json.loads(RO_VIN_CACHE.read_text(encoding="utf-8")) if RO_VIN_CACHE.exists() else {}
+    except Exception:
+        cache = {}
+    for appt in appointments or []:
+        ro, vin = str(appt.get("roNumber") or ""), clean_vin(appt.get("vin"))
+        if ro and vin and not (cache.get(ro) or {}).get("vin"):
+            cache[ro] = {"vin": vin}
+    try:
+        last = json.loads((ROOT / "tech-board-last.json").read_text(encoding="utf-8")).get("board")
+        for ro, info in vehicles_from_payloads(None, last).items():
+            if not (cache.get(ro) or {}).get("vin"):
+                cache[ro] = info
+    except Exception:
+        pass
+    now = time.time()
+    missing = [item for item in repair_orders if item.get("detailUrl") and not (cache.get(str(item["roNumber"])) or {}).get("vin")
+               and now - float((cache.get(str(item["roNumber"])) or {}).get("triedAt") or 0) > RO_VIN_RETRY_SECONDS]
+    page = None
+    try:
+        for item in missing[:RO_VIN_MAX_PAGES_PER_SYNC]:
+            ro = str(item["roNumber"])
+            if page is None:
+                page = context.new_page()
+            try:
+                base_url = re.sub(r"/(?:summary|estimate|work-in-progress|repairs|payment)(?:/.*)?$", "", str(item["detailUrl"]).rstrip("/"))
+                page.goto(base_url + "/estimate", wait_until="domcontentloaded", timeout=45000)
+                page.wait_for_timeout(1500)
+                info = vehicle_from_text(page.locator("body").inner_text())
+                cache[ro] = info if info.get("vin") else {**info, "triedAt": now}
+            except Exception as exc:
+                log(f"RO#{ro} VIN could not be read: {exc}")
+                cache[ro] = {"triedAt": now}
+    finally:
+        if page is not None:
+            page.close()
+    live = {str(item["roNumber"]) for item in repair_orders}
+    cache = {ro: value for ro, value in cache.items() if ro in live}
+    try:
+        RO_VIN_CACHE.write_text(json.dumps(cache), encoding="utf-8")
+    except Exception:
+        pass
+    found = apply_vehicles(repair_orders, {ro: value for ro, value in cache.items() if value.get("vin")})
+    log(f"RO VINs: {found} of {len(repair_orders)} job-board ROs have a VIN")
+    return found
+
+
+def attach_ro_jobs(context, repair_orders: list[dict]) -> int:
+    """Read each WIP RO's Work-In-Progress tab for its jobs (name, tech, hours, order, done, logged time).
+
+    Read-only: only opens pages; never clicks anything. Results are cached per RO and refreshed at most every
+    15 minutes, at most 30 ROs per sync, so a full board sync stays quick.
+    """
+    try:
+        cache = json.loads(RO_JOBS_CACHE.read_text(encoding="utf-8")) if RO_JOBS_CACHE.exists() else {}
+    except Exception:
+        cache = {}
+    now = time.time()
+    wip = [item for item in repair_orders if item.get("section") == "work-in-progress" and repairs_url(item.get("detailUrl") or "")]
+    stale = sorted(wip, key=lambda item: float((cache.get(str(item["roNumber"])) or {}).get("fetchedAt") or 0))
+    fetched = 0
+    page = None
+    try:
+        for item in stale:
+            ro = str(item["roNumber"])
+            entry = cache.get(ro) or {}
+            if now - float(entry.get("fetchedAt") or 0) < RO_JOBS_REFRESH_SECONDS or fetched >= RO_JOBS_MAX_PER_SYNC:
+                continue
+            if page is None:
+                page = context.new_page()
+            try:
+                page.goto(repairs_url(item["detailUrl"]), wait_until="domcontentloaded", timeout=45000)
+                page.get_by_text("Jobs", exact=True).first.wait_for(timeout=15000)
+                page.wait_for_timeout(1200)
+                jobs = parse_ro_jobs(page.locator("body").inner_text())
+                cache[ro] = {"fetchedAt": now, "jobs": jobs}
+                fetched += 1
+            except Exception as exc:
+                log(f"RO#{ro} jobs could not be read: {exc}")
+                cache[ro] = {"fetchedAt": now, "jobs": entry.get("jobs") or []}
+    finally:
+        if page is not None:
+            page.close()
+    live = {str(item["roNumber"]) for item in wip}
+    cache = {ro: value for ro, value in cache.items() if ro in live}
+    try:
+        RO_JOBS_CACHE.write_text(json.dumps(cache), encoding="utf-8")
+    except Exception:
+        pass
+    # Tekmetric's Tech Board is the source of truth for job tech / done / Unassigned; the WIP-tab read adds logged time.
+    board = read_tech_board(context)
+    # One failed read must not empty the board: reuse the last good Tech Board for up to 30 minutes.
+    last_path = ROOT / "tech-board-last.json"
+    if board:
+        try:
+            last_path.write_text(json.dumps({"at": time.time(), "board": board}), encoding="utf-8")
+        except Exception:
+            pass
+    else:
+        try:
+            last = json.loads(last_path.read_text(encoding="utf-8"))
+            if time.time() - float(last.get("at") or 0) < 30 * 60:
+                board = last.get("board")
+                log("Tech Board read failed; using the last good copy")
+        except Exception:
+            pass
+    board_jobs = parse_tech_board(board) if board else {}
+    if board:
+        summary = unassigned_summary(board)
+        log(f"Tech Board: Unassigned lane has {summary['repairOrders']} ROs, {summary['jobs']} open jobs, {summary['hours']} hrs")
+    with_jobs = 0
+    for item in wip:
+        ro = str(item["roNumber"])
+        scraped = (cache.get(ro) or {}).get("jobs") or []
+        # Approved jobs only: the Tech Board lists approved jobs. With a good Tech Board read, an RO that isn't on it
+        # has no approved open job, so its WIP-tab jobs are sent unapproved (they only carry status/logged time).
+        jobs = board_jobs.get(ro) or [{**job, "authorized": False} for job in scraped] if board else scraped
+        if board_jobs.get(ro) and scraped:
+            logged = {job["name"].lower(): job.get("loggedSeconds") for job in scraped}
+            jobs = [{**job, "loggedSeconds": job.get("loggedSeconds") if job.get("loggedSeconds") is not None else logged.get(job["name"].lower())} for job in jobs]
+            # The Tech Board can leave out finished jobs; keep the WIP tab's Completed ones (e.g. a done diag).
+            names = {job["name"].lower() for job in jobs}
+            jobs += [{**job, "jobId": f"w{job['jobId']}", "authorized": True} for job in scraped if job.get("completed") and job["name"].lower() not in names]
+        if jobs:
+            item["jobs"] = jobs
+            with_jobs += 1
+    if fetched:
+        log(f"Read jobs on {fetched} WIP repair orders ({with_jobs} of {len(wip)} WIP ROs have job detail)")
+    return with_jobs
+
+
 def sync_job_board(context, config: Config, run_ticket_audit: bool = False) -> int:
     page = context.new_page()
     collected: dict[str, dict] = {}
@@ -3113,7 +3324,16 @@ def sync_job_board(context, config: Config, run_ticket_audit: bool = False) -> i
                 "The Job Board opened but no repair-order cards could be parsed."
             )
         repair_orders = list(collected.values())
-        post_job_board(config, repair_orders)
+        try:
+            attach_ro_jobs(context, repair_orders)
+        except Exception as jobs_exc:
+            log(f"RO job detail read failed: {jobs_exc}")
+        appointments = read_appointments(context)
+        try:
+            attach_ro_vehicles(context, repair_orders, appointments)
+        except Exception as vin_exc:
+            log(f"RO VIN read failed: {vin_exc}")
+        post_job_board(config, repair_orders, appointments)
         try:
             sync_delta_ai_estimates(context, config, repair_orders)
         except Exception as delta_ai_exc:

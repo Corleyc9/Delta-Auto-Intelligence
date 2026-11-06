@@ -1,0 +1,200 @@
+Jobs
+Diagnostic Test/ SES LIGHT COMING ON
+ 
+(1 Hours)
+  
+  
+Beau Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Diagnose Customer Concern(s)
+	
+Beau Corley
+	
+Part			Qty
+No parts added
+No Comments
+Diagnostic Test/ CHECK SLACK AND POP IN FRONT END
+ 
+(1 Hours)
+  
+  
+Beau Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Diagnose Customer Concern(s)
+	
+Beau Corley
+	
+Part			Qty
+No parts added
+No Comments
+REMOVE AND REPLACE TRAC BAR ASSEMBLY FOR SLACK
+ 
+(1 Hours)
+  
+  
+MIKE COOK
+ 00:00:00 
+Completed
+Labor	Technician	
+
+No labor details provided
+	
+MIKE COOK
+	
+Part			Qty
+
+Chrysler Track Bar, Front
+68248930AA
+Received
+			1
+
+Chrysler BOLT, Hex Flange Head
+6104302AA
+Received
+			1
+
+Standard Ignition Ignition Coil Connector
+S2315
+Received
+			1
+No Comments
+Differential Pressure Sensor Remove and Replace
+ 
+(1 Hours)
+  
+  
+MIKE COOK
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Differential Pressure Sensor Remove and Replace
+	
+MIKE COOK
+	
+Part			Qty
+
+Chrysler Sensor, Differential Pressure
+68085750AB
+Received
+			1
+No Comments
+OIL AND FILTER CHANGE
+ 
+(0.6 Hours)
+  
+  
+Mario Butler
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Remove & Replace Engine Oil & Filter
+	
+Mario Butler
+	
+Part			Qty
+
+Shell 15W-40 Rotella T4 CK-4 (1 gal)
+550045126
+Inventory
+			3
+
+NAPA Gold Filters Engine Oil Filter
+7620
+Received
+			1
+
+Shell ROTELLA Engine Oil
+550045126
+Received
+			1
+No Comments
+CS TRUCK IS RUNNING HOT HAD TO STOP TO LET COOL OFF ON THE WAY HERE.
+ 
+(1 Hours)
+  
+  
+Devin Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+No labor details provided
+	
+Devin Corley
+	
+Part			Qty
+No parts added
+No Comments
+Remove & Replace Cylinder Head Gasket
+ 
+(11.16 Hours)
+  
+  
+Stacy Williams
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Remove & Replace Cylinder Head Gasket
+	
+Stacy Williams
+	
+Part			Qty
+
+FEL-PRO Engine Cylinder Head Gasket Set
+HS26679PT1
+Received
+			1
+
+FEL-PRO Engine Cylinder Head Bolt Set
+ES72193
+Received
+			1
+
+Chrysler THERMOSTAT
+68534176AA
+Received
+			1
+
+Glacier Guard Gold Global Full Strength Antifreeze/Coolant
+80565-80906
+Inventory
+			2
+
+Dorman Engine Air Intake Hose
+696207
+Received
+			1
+No Comments
+DOT Inspection
+ 
+(1.2 Hours)
+  
+  
+Beau Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+DEPARTMENT OF TRANSPORTATION INSPECTION
+	
+Beau Corley
+	
+Part			Qty
+No parts added
+No Comments
+
+
+
+17.96/17.96 Hours
+100%
+Complete
+COMPLETE WORK
