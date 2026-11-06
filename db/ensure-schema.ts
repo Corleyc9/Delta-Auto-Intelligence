@@ -282,6 +282,31 @@ const TABLE_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS ro_approval_events_ro_idx
     ON ro_approval_events (ro_number, occurred_at DESC)`,
+  // Tech Board revisions suggestion box (same definition as app/tech-board/suggestions.ts and drizzle/0004).
+  `CREATE TABLE IF NOT EXISTS board_suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'Other',
+    submitter TEXT NOT NULL DEFAULT '',
+    submitter_tech TEXT,
+    source TEXT NOT NULL DEFAULT 'writer',
+    status TEXT NOT NULL DEFAULT 'New',
+    reply TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  // Writer schedule inbox (same definition as app/tech-board/schedule-requests.ts and drizzle/0005).
+  `CREATE TABLE IF NOT EXISTS board_schedule_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    submitter TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'writer',
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    done_by TEXT NOT NULL DEFAULT '',
+    done_at TEXT
+  )`,
 ];
 
 const ALTER_STATEMENTS = [

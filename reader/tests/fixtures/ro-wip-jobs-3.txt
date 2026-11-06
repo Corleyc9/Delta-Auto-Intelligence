@@ -1,0 +1,100 @@
+Jobs
+Diagnostic Test
+ 
+(2 Hours)
+  
+  
+Stacy Williams
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Diagnose Customer Concern(s)
+	
+Stacy Williams
+	
+Part			Qty
+No parts added
+No Comments
+ADD COMMENT
+REMOVE AND REPLACE POWER LINE FOR LEAK
+ 
+(3.24 Hours)
+  
+  
+Stacy Williams
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Remove & Replace Power Steering Line
+	
+Stacy Williams
+	
+Part			Qty
+
+DODGE POWER STEERING LINE
+68724157AA CALL IN
+Received
+			1
+No Comments
+ADD COMMENT
+REMOVE AND REPLACE ALTERNATOR FOR INTERNAL REGULATOR ISSUE WARRANTY REFER RO 36556
+ 
+(2.88 Hours)
+  
+  
+Beau Corley
+ 00:00:00 
+Mark Completed
+Labor	Technician	
+
+Remove & Replace Alternator Primary
+	
+Beau Corley
+	
+
+
+Remove & Replace Alternator Primary
+	
+Beau Corley
+	
+Part			Qty
+
+NAPA Power Premium Plus Alternator
+2138908
+Received
+Core
+			1
+
+Chrysler GENERATOR, ENGINE
+1BP00792AA
+Received
+			1
+No Comments
+ADD COMMENT
+DOT Inspection
+ 
+(1.2 Hours)
+  
+  
+Beau Corley
+ 00:00:00 
+Mark Completed
+Labor	Technician	
+
+DEPARTMENT OF TRANSPORTATION INSPECTION
+	
+Beau Corley
+	
+Part			Qty
+No parts added
+No Comments
+ADD COMMENT
+
+
+
+6.68/9.32 Hours
+72%
+Complete
+COMPLETE WORK

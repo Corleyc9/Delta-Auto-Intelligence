@@ -1,0 +1,248 @@
+Jobs
+Diagnostic Test
+ 
+(0.5 Hours)
+  
+  
+Devin Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Diagnose Customer Concern(s)
+	
+Devin Corley
+	
+Part			Qty
+
+3YR WTY BATTERY
+8465AAA
+Inventory
+			1
+No Comments
+R & R Fuel Pump
+ 
+(1 Hours)
+  
+  
+Devin Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+R & R Fuel Pump
+	
+Devin Corley
+	
+Part			Qty
+No parts added
+No Comments
+Carb R and R
+ 
+(1.5 Hours)
+  
+  
+Stacy Williams
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Carb R and R
+	
+Stacy Williams
+	
+Part			Qty
+
+Oreilly Carb Kit
+12750
+Received
+			1
+No Comments
+Remove and Replace Spark plugs and Wires
+ 
+(1 Hours)
+  
+  
+Beau Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Remove and Replace Spark plugs and Wires
+	
+Beau Corley
+	
+Part			Qty
+
+Motorcraft Spark Plug
+SP-425-X
+Received
+			8
+
+Duralast Wireset
+4850
+Received
+			1
+No Comments
+Oil and Filter Change
+ 
+(0.3 Hours)
+  
+  
+Joshua Dewitt
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Oil and Filter Change
+	
+Joshua Dewitt
+	
+Part			Qty
+
+NAPA Gold Filters Oil Filter - NAPA Gold
+1515
+Received
+			1
+
+Rislone Engine Oil Additive
+4405
+Received
+			1
+
+Napa 10w30
+75135
+Received
+			2
+
+Fuel (Gas)
+Received
+			1
+No Comments
+R & R Carb
+ 
+(1.5 Hours)
+  
+  
+Beau Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+R & R Carb
+	
+Beau Corley
+	
+Part			Qty
+
+Holly Carbuerator
+HOL 0-804575
+Received
+			1
+
+NAPA Threaded Rod
+8131401
+Received
+			1
+No Comments
+Mount/Balance Tires (4)
+ 
+(1 Hours)
+  
+  
+Beau Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Mount/Balance Tires (4)
+	
+Beau Corley
+	
+Part			Qty
+
+Nexen
+15408NXK [W]/[AR]/[D]
+Received
+		
+DOT #
+	4
+No Comments
+Diagnose A/C
+ 
+  
+  
+Completed
+Labor	Technician	
+No labor added
+Part			Qty
+
+NAPA VACUUM TEE ASSORTMENT
+715-1813
+Received
+			1
+
+Thermo King AC Line Custom
+custom
+Received
+			1
+No Comments
+CC (Courtesy Check)
+ 
+(0.1 Hours)
+  
+  
+Devin Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+Courtesy Check
+	
+Devin Corley
+	
+Part			Qty
+No parts added
+No Comments
+Fuel
+ 
+(2 Hours)
+  
+  
+Beau Corley
+ 00:00:00 
+Completed
+Labor	Technician	
+
+No labor details provided
+	
+Beau Corley
+	
+Part			Qty
+
+Fuel (Gas)
+Received
+			1
+No Comments
+REMOVE AND REPLACE AC COMPRESSOR FOR FAILURE
+ 
+  
+  
+Completed
+Labor	Technician	
+No labor added
+Part			Qty
+
+NAPA A/C Compressor
+251227
+Received
+Core
+			1
+No Comments
+
+
+
+8.9/8.9 Hours
+100%
+Complete
+COMPLETE WORK

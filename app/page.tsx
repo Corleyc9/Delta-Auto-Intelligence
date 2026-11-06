@@ -43,6 +43,7 @@ import LeadsView from "./components/views/LeadsView";
 import WritersView from "./components/views/WritersView";
 import ScheduleHistoryView from "./components/views/ScheduleHistoryView";
 import LotWalkView from "./components/views/LotWalkView";
+import TechBoardPanel from "./tech-board/TechBoardPanel";
 import { DashboardContext } from "./dashboard-context";
 
 export default function Home() {
@@ -261,6 +262,10 @@ export default function Home() {
   const activeSoldHourRos = repairOrders.filter((order) =>
     order.section === "estimates" || order.section === "work-in-progress"
   ).length;
+
+  useEffect(() => {
+    if (window.location.pathname.replace(/\/$/, "") === "/tech-board") setNav("Tech Board");
+  }, []);
 
   useEffect(() => {
     fetch("/api/auth", { cache: "no-store" })
@@ -640,7 +645,13 @@ export default function Home() {
     .sort((a, b) => b.ageDays - a.ageDays);
   const jobCategories = Array.from(new Set(repairOrders.map((item) => item.category))).sort();
   const jobWriters = Array.from(new Set(repairOrders.map((item) => item.serviceWriter))).sort();
-  const verifyQueue = verificationRecords.filter((item) => item.status === "pending");
+  // Only show pending verifications whose RO currently carries a Verify label on the job board.
+  const isVerifyLabel = (raw: string) => {
+    const label = (raw || "").toLowerCase().trim();
+    return label === "verify" || label.includes("verify parts&labor") || label.includes("verify parts/labor");
+  };
+  const verifyTaggedRos = new Set(repairOrders.filter((item) => isVerifyLabel(item.label)).map((item) => item.roNumber));
+  const verifyQueue = verificationRecords.filter((item) => item.status === "pending" && verifyTaggedRos.has(item.roNumber));
   const verificationHistory = verificationRecords.filter((item) => item.status === "verified");
   const visibleVerificationRecords = verificationView === "pending" ? verifyQueue : verificationHistory;
   const criticalJobs = repairOrders.filter((item) => item.section === "work-in-progress" && item.ageDays >= 7).length;
@@ -1254,6 +1265,7 @@ export default function Home() {
     <main className="app-shell">
       <SideRail nav={nav} onNavigate={(label) => {
         setNav(label);
+        if (typeof window !== "undefined") window.history.replaceState(null, "", label === "Tech Board" ? "/tech-board" : "/");
         if (label === "Reader") setConnectionOpen(true);
         if (label === "Settings") setAiSetupOpen(true);
       }} />
@@ -1275,7 +1287,9 @@ export default function Home() {
           webhookEvents={webhookEvents}
           onOpenReader={() => setConnectionOpen(true)}
         />
-        {nav === "Payroll" ? (
+        {nav === "Tech Board" ? (
+          <TechBoardPanel />
+        ) : nav === "Payroll" ? (
           <PayrollPanel weekly={liveSnapshot} lastWeek={lastWeekSnapshot} weeklyWriters={weeklyWriters} lastWeekWriters={lastWeekWriters} />
         ) : nav === "Verify Queue" ? (
           <VerifyQueueView />
