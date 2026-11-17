@@ -1,6 +1,7 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { sessionSecretFrom, techGate, writerSessionValid } from "../app/lib/tech-session";
 
 interface Env {
   ASSETS: Fetcher;
@@ -30,6 +31,11 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    // Tech PIN sessions may only reach /tech, /api/tech and static assets (enforced here, before any route runs).
+    const secret = sessionSecretFrom(env as unknown as Record<string, unknown>);
+    const blocked = await techGate(request, secret, (cookie) => writerSessionValid(cookie, secret));
+    if (blocked) return blocked;
+
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {
@@ -42,6 +48,10 @@ const worker = {
     }
 
     return handler.fetch(request, env, ctx);
+  },
+  /** Cron trigger (wrangler.toml [triggers], every 15 min). Deliberately a no-op: the reader drives syncs. */
+  async scheduled(): Promise<void> {
+    console.log("cron tick (no-op)");
   },
 };
 

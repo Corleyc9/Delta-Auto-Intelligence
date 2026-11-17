@@ -43,6 +43,7 @@ import LeadsView from "./components/views/LeadsView";
 import WritersView from "./components/views/WritersView";
 import ScheduleHistoryView from "./components/views/ScheduleHistoryView";
 import LotWalkView from "./components/views/LotWalkView";
+import TechBoardPanel from "./tech-board/TechBoardPanel";
 import { DashboardContext } from "./dashboard-context";
 
 export default function Home() {
@@ -261,6 +262,10 @@ export default function Home() {
   const activeSoldHourRos = repairOrders.filter((order) =>
     order.section === "estimates" || order.section === "work-in-progress"
   ).length;
+
+  useEffect(() => {
+    if (window.location.pathname.replace(/\/$/, "") === "/tech-board") setNav("Tech Board");
+  }, []);
 
   useEffect(() => {
     fetch("/api/auth", { cache: "no-store" })
@@ -1254,6 +1259,7 @@ export default function Home() {
     <main className="app-shell">
       <SideRail nav={nav} onNavigate={(label) => {
         setNav(label);
+        if (typeof window !== "undefined") window.history.replaceState(null, "", label === "Tech Board" ? "/tech-board" : "/");
         if (label === "Reader") setConnectionOpen(true);
         if (label === "Settings") setAiSetupOpen(true);
       }} />
@@ -1275,7 +1281,9 @@ export default function Home() {
           webhookEvents={webhookEvents}
           onOpenReader={() => setConnectionOpen(true)}
         />
-        {nav === "Payroll" ? (
+        {nav === "Tech Board" ? (
+          <TechBoardPanel />
+        ) : nav === "Payroll" ? (
           <PayrollPanel weekly={liveSnapshot} lastWeek={lastWeekSnapshot} weeklyWriters={weeklyWriters} lastWeekWriters={lastWeekWriters} />
         ) : nav === "Verify Queue" ? (
           <VerifyQueueView />
