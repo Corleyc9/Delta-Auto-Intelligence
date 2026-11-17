@@ -3,7 +3,8 @@
 import { scanCodes, scanNotes, type BayScan, type OpenRo } from "./bayscan.ts";
 import { splitVehicle, webhookBody } from "./identifix.ts";
 import { notifyIdentifixWebhook } from "./identifix-notify.ts";
-import { addIdentifixRequest, saveCheckin } from "./store";
+import { addIdentifixRequest } from "./identifix-store.ts";
+import { saveCheckin } from "./checkin-store.ts";
 
 type Db = Parameters<typeof saveCheckin>[0];
 export async function attachScan(db: Db, scan: BayScan, ro: OpenRo, by: string, now: string, notify = true) {

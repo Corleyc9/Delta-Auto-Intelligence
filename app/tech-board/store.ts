@@ -4,7 +4,7 @@ import { jobsFromPayload, normalizeJobs } from "./ro-jobs";
 import { ensureEvents, recordBoardNotice, recordTekmetricChanges } from "./events";
 import { sendInstant } from "./teams-notify";
 import { IDENTIFIX_REQUESTS_SQL } from "./identifix-store.ts";
-import { BAYSCAN_SQL } from "./bayscan-store.ts";
+import { BAYSCAN_ALTER, BAYSCAN_SQL } from "./bayscan-store.ts";
 import { BOARD_SUGGESTIONS_SQL, rowToSuggestion } from "./suggestions";
 import { BOARD_SCHEDULE_REQUESTS_SQL, rowToScheduleRequest, type ScheduleRequest } from "./schedule-requests";
 import { BoardJob, BoardRepairOrder, DEFAULT_TECHS, ExistingRow, TechCapacity, toTekSchedule, TimeOff, UNASSIGNED, chicagoDate, schedule, Appointment, JobProgress, appointmentMinute, chicagoMinute, parentRoOf } from "./scheduler";
@@ -146,6 +146,7 @@ export async function initializeTechBoard(db: D1) {
   for (const column of BOARD_JOB_ADDED_COLUMNS) {
     await db.prepare(`ALTER TABLE board_jobs ADD COLUMN ${column}`).run().catch(() => undefined);
   }
+  for (const sql of BAYSCAN_ALTER) await db.prepare(sql).run().catch(() => undefined);
   await db.batch(DEFAULT_TECHS.map((tech) => db.prepare(`INSERT OR IGNORE INTO tech_capacity
     (initials, name, day_minutes, diag_block_minutes, day_start_minute, active, sort_order) VALUES (?, ?, ?, ?, ?, 1, ?)`)
     .bind(tech.initials, tech.name, tech.dayMinutes, tech.diagBlockMinutes, tech.dayStartMinute, tech.sortOrder)));
@@ -460,19 +461,8 @@ export async function markScheduleRequestDone(db: D1, id: number, doneBy: string
     .bind(doneBy, now, now, id).run();
 }
 
-/** v1.6.15: check-in scan codes per RO. */
-export async function loadCheckins(db: D1): Promise<import("./dtc").Checkin[]> {
-  const rows = await db.prepare(`SELECT * FROM board_checkin`).all<Record<string, unknown>>().catch(() => ({ results: [] as Record<string, unknown>[] }));
-  return rows.results.map((row) => { let codes: string[] = []; try { codes = JSON.parse(String(row.codes_json || "[]")); } catch { codes = []; }
-    return { ro: String(row.ro), codes, notes: String(row.notes || ""), updatedBy: String(row.updated_by || ""), updatedAt: String(row.updated_at || "") }; });
-}
-export async function saveCheckin(db: D1, ro: string, codes: string[], notes: string, by: string, now: string) {
-  if (!codes.length && !notes.trim()) { await db.prepare(`DELETE FROM board_checkin WHERE ro = ?`).bind(ro).run(); return; }
-  await db.prepare(`INSERT INTO board_checkin (ro, codes_json, notes, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(ro) DO UPDATE SET codes_json = excluded.codes_json, notes = excluded.notes, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
-    .bind(ro, JSON.stringify(codes), notes.slice(0, 2000), by.slice(0, 120), now).run();
-}
+export { loadCheckins, saveCheckin } from "./checkin-store.ts";
 
 export { loadIdentifixRequests, getIdentifixRequest, addIdentifixRequest, claimIdentifixRequest, finishIdentifixRequest } from "./identifix-store.ts";
 
-export { saveScan, getScan, loadUnmatchedScans, markScan, loadRoVins, setRoVin } from "./bayscan-store.ts";
+export { saveScan, getScan, loadUnmatchedScans, loadRematchScans, markScan, claimScanForRo, releaseScanClaim, setScanTek, loadRoScans, scansMissingJobs, loadRoVins, setRoVin, getBayScanJob, getBayScanJobByScan } from "./bayscan-store.ts";

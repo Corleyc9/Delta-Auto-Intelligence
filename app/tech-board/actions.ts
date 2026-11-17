@@ -10,9 +10,11 @@ import { recordScheduleRequestEvent, recordSuggestionEvent, recordUpdateEvent } 
 import { sendInstant } from "@/app/tech-board/teams-notify";
 import { newIdentifixRequest, webhookBody } from "@/app/tech-board/identifix";
 import { notifyIdentifixWebhook } from "@/app/tech-board/identifix-notify";
-import { addIdentifixRequest, loadIdentifixRequests, getScan, loadRoVins, loadUnmatchedScans, markScan, setRoVin } from "@/app/tech-board/store";
+import { addIdentifixRequest, loadIdentifixRequests, getScan, loadRoScans, loadRoVins, loadUnmatchedScans, markScan, setRoVin } from "@/app/tech-board/store";
 import { normalizeVin, validVin } from "@/app/tech-board/bayscan";
-import { attachScan } from "@/app/tech-board/bayscan-attach";
+import { commitScanAttach } from "@/app/tech-board/bayscan-rematch";
+import { r2Bucket } from "@/app/lib/r2";
+import { runtimeEnv } from "@/app/lib/runtime";
 
 
 
@@ -30,7 +32,8 @@ export async function boardPayload(db: Awaited<ReturnType<typeof techBoardDb>>, 
   const identifixRequests = await loadIdentifixRequests(db);
   const roVins = Object.fromEntries(await loadRoVins(db)); // v1.6.18 writer-entered VINs
   const unmatchedScans = await loadUnmatchedScans(db);
-  return { identifixRequests, roVins, unmatchedScans, today, days, date: selected, techs, jobs: jobs.filter((job) => !job.hidden), updates, timeOff, poolRequests,
+  const roScans = await loadRoScans(db as never); // v1.6.21 per-module Bay Scan + Tekmetric attach status, by RO
+  return { identifixRequests, roVins, unmatchedScans, roScans, today, days, date: selected, techs, jobs: jobs.filter((job) => !job.hidden), updates, timeOff, poolRequests,
     syncedRos, suggestions, scheduleRequests, checkins, pinsSet: pins.map((pin) => pin.initials), version: APP_VERSION, startDate: await getStartDate(db),
     unassigned: UNASSIGNED, lunch: { start: LUNCH_START, end: LUNCH_END } };
 }
@@ -219,9 +222,9 @@ async function runBoardAction(db: BoardDb, body: Record<string, unknown> & { act
       const number = String(body.ro || "").replace(/\D/g, "");
       const synced = (await loadSyncedRos(db)).find((item) => item.ro === number);
       if (!synced) return Response.json({ error: `RO#${number || "?"} isn't in the synced Tekmetric data` }, { status: 404 });
-      await attachScan(db, scan.scan, synced, auth.displayName, now);
-      await markScan(db as never, scan.id, "attached", number, auth.displayName, now);
-      if (!(await loadRoVins(db)).get(number)) await setRoVin(db as never, number, scan.vin, auth.displayName, now); // next scan of this car matches by itself
+      const env = await runtimeEnv().catch(() => ({} as Record<string, unknown>));
+      const attached = await commitScanAttach(db as never, scan.id, synced, auth.displayName, now, r2Bucket(env));
+      if (!attached) return Response.json({ error: "That scan is no longer in Unmatched scans" }, { status: 404 });
       notice = `Scan attached to RO#${number} as a check-in scan.`;
     }
   } else if (body.action === "checkin-set") {

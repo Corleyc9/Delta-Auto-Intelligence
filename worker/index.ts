@@ -49,9 +49,14 @@ const worker = {
 
     return handler.fetch(request, env, ctx);
   },
-  /** Cron trigger (wrangler.toml [triggers], every 15 min). Deliberately a no-op: the reader drives syncs. */
-  async scheduled(): Promise<void> {
-    console.log("cron tick (no-op)");
+  /** Cron trigger (wrangler.toml [triggers], every 15 min). Re-matches Bay Scan scans the reader has not synced yet. */
+  async scheduled(_event: unknown, env: Env): Promise<void> {
+    try {
+      const { runBayScanCron } = await import("../app/tech-board/bayscan-maintain");
+      await runBayScanCron(env);
+    } catch (error) {
+      console.error("bayscan cron failed", error);
+    }
   },
 };
 
