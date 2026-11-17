@@ -58,6 +58,7 @@ Configure these on the Worker. Never commit values.
 | `TEKMETRIC_WEBHOOK_SECRET` | Optional shared secret. Put it in the webhook URL as `?secret=...` (Tekmetric’s Custom Integration UI is name + URL + event checkboxes; it does not document HMAC). Also accepted as `X-Tekmetric-Webhook-Secret`, `Authorization: Bearer`, or HMAC-SHA256 if a signature header is ever sent. |
 | `TEKMETRIC_SHOP_ID` | Optional. Defaults to `4326`. Events with a different shop id are stored but do not change shop signals. |
 | `TEKMETRIC_VERIFY_LABEL` | Optional. Exact Tekmetric Job Board label applied after dashboard **Verified**. Defaults to `Verified/Send Estimate` (slash, no spaces — confirmed on Devin’s teach demo). Set this only if the live chip text ever changes. |
+| `BAYSCAN_DEVICE_KEY` | Bay Scan handhelds. `POST /api/bayscan/scan` only. One shared secret, or per-bay `bay1:<secret>,bay2:<secret>`. Never a Tekmetric credential. |
 
 Logical bindings in `wrangler.toml` and `.openai/hosting.json`: `d1` = `DB`, `r2` = `BUCKET`. This rebuild does not reuse the previous Sites `project_id`.
 
@@ -210,6 +211,24 @@ Do not turn off the shop PC reader after enabling webhooks.
 
 Payroll tables, technician targets, GP formulas, and API payload shapes are unchanged from the companion source.
 
+## Bay Scan check-in uploads
+
+Handhelds (the bay Raspberry Pi) POST a scan to `POST /api/bayscan/scan`. The route stores the scan in D1 and matches the VIN to the latest synced Job Board snapshot. It never creates a Tekmetric ticket.
+
+Auth is only this route:
+
+- Header `Authorization: Bearer <secret>`
+- Header `x-bayscan-device: bay1` (the device id; the body `deviceId` is the fallback)
+- Worker secret `BAYSCAN_DEVICE_KEY`: one shared secret, or per bay `bay1:<secret>,bay2:<secret>` (or the same map as JSON)
+
+A missing or wrong key returns **401** `Invalid device key`. If `BAYSCAN_DEVICE_KEY` is unset, the route returns **503** and does not crash. A single open-RO VIN match returns `matchedBy: "vin"`. If no full VIN matches, the last 6 characters match only when exactly one open RO fits (`matchedBy: "last6"`). `openRosWithoutVin` counts open job-board ROs that still have no VIN. Anything else stays on the Tech Board **Unmatched scans** list.
+
+```bash
+npx wrangler secret put BAYSCAN_DEVICE_KEY
+```
+
+Do not put the secret value in git, logs, or the dashboard.
+
 ## Production cutover for `deltaintelligence.cc` (not done in this repo)
 
 The shop owns `deltaintelligence.cc`. Merging this PR does not change DNS or the live Worker.
@@ -218,7 +237,7 @@ The shop owns `deltaintelligence.cc`. Merging this PR does not change DNS or the
 
 1. Keep the existing D1 database and R2 bucket. Bind them as `DB` and `BUCKET`. Do not drop live tables; `ensureSchema` only adds missing tables/columns.
 2. Set Worker secrets by name (values stay in Cloudflare, never in git):
-   `DASHBOARD_PASSWORD`, `DASHBOARD_SESSION_SECRET`, `PAYROLL_PASSWORD`, `PAYROLL_SESSION_SECRET`, `READER_API_KEY`, `SITES_MACHINE_TOKEN`, `AI_ENCRYPTION_KEY`, `TEKMETRIC_WEBHOOK_PATH_TOKEN`, `TEKMETRIC_WEBHOOK_SECRET`.
+   `DASHBOARD_PASSWORD`, `DASHBOARD_SESSION_SECRET`, `PAYROLL_PASSWORD`, `PAYROLL_SESSION_SECRET`, `READER_API_KEY`, `SITES_MACHINE_TOKEN`, `AI_ENCRYPTION_KEY`, `TEKMETRIC_WEBHOOK_PATH_TOKEN`, `TEKMETRIC_WEBHOOK_SECRET`, `BAYSCAN_DEVICE_KEY`.
    Example: `npx wrangler secret put DASHBOARD_PASSWORD` (repeat for each name).
 3. Deploy this build to the Worker that already serves `deltaintelligence.cc` (or attach the custom domain after deploy). Confirm the dashboard login still uses user `delta`.
 4. On the shop PC, download the new reader ZIP from the live dashboard. The hash next to Download must match **Reader build**. Run `install-reader.ps1`, then `register-scheduled-task.ps1` as the interactive Windows user.

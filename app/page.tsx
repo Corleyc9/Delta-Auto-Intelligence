@@ -645,13 +645,7 @@ export default function Home() {
     .sort((a, b) => b.ageDays - a.ageDays);
   const jobCategories = Array.from(new Set(repairOrders.map((item) => item.category))).sort();
   const jobWriters = Array.from(new Set(repairOrders.map((item) => item.serviceWriter))).sort();
-  // Only show pending verifications whose RO currently carries a Verify label on the job board.
-  const isVerifyLabel = (raw: string) => {
-    const label = (raw || "").toLowerCase().trim();
-    return label === "verify" || label.includes("verify parts&labor") || label.includes("verify parts/labor");
-  };
-  const verifyTaggedRos = new Set(repairOrders.filter((item) => isVerifyLabel(item.label)).map((item) => item.roNumber));
-  const verifyQueue = verificationRecords.filter((item) => item.status === "pending" && verifyTaggedRos.has(item.roNumber));
+  const verifyQueue = verificationRecords.filter((item) => item.status === "pending");
   const verificationHistory = verificationRecords.filter((item) => item.status === "verified");
   const visibleVerificationRecords = verificationView === "pending" ? verifyQueue : verificationHistory;
   const criticalJobs = repairOrders.filter((item) => item.section === "work-in-progress" && item.ageDays >= 7).length;
