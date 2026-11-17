@@ -24,7 +24,7 @@ export default function VerifyQueueView() {
               <div>
                 <p className="panel-kicker">LIVE TEKMETRIC REVIEW QUEUE</p>
                 <h2>Repair Orders Waiting for Verification</h2>
-                <p>Every RO becomes required here when its Needs Diag label is removed. It stays open until you click Verified.</p>
+                <p>Only ROs currently tagged Verify in Tekmetric are shown. Each stays open until you click Verified.</p>
               </div>
               <div className="lead-summary">
                 <strong>{verifyQueue.length}</strong>
