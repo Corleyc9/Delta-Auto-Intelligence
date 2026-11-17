@@ -12,8 +12,8 @@ import { APP_VERSION } from "../app/lib/version.ts";
 
 const src = (path) => readFileSync(path, "utf8");
 
-test("build version is v1.6.20 (schedule inbox)", () => {
-  assert.equal(APP_VERSION, "v1.6.20");
+test("build version is v1.6.20 or newer (schedule inbox)", () => {
+  assert.match(APP_VERSION, /^v1\.6\.(2\d|[3-9]\d)$/);
 });
 
 test("a schedule need is freeform text plus a writer name, and never a typed tech identity", () => {

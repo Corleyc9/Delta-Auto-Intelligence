@@ -47,7 +47,7 @@ test("scoped: BAYSCAN_DEVICE_KEY only read by /api/bayscan/scan; that route acce
 test("scan parsing: VIN required/normalized, code statuses, dedupe across modules, notes label", () => {
   const scan = parseScan(body, "bay1");
   assert.equal(scan.vin, VIN); assert.equal(scan.odometer, 123456); assert.equal(scan.battery, 87);
-  assert.deepEqual(scan.modules[1].codes.map((c) => [c.code, c.status]), [["U0100", "permanent"], ["P0301", "stored"]]);
+  assert.deepEqual(scan.modules[1].codes.map((c) => [c.code, c.status]), [["U0100", "permanent"], ["P0301", "weird"]], "unknown statuses are kept, not collapsed to stored");
   assert.deepEqual(scanCodes(scan), ["P0301", "P0420", "U0100"]);
   assert.ok(scanNotes(scan).startsWith(BAYSCAN_LABEL)); assert.match(BAYSCAN_LABEL, /not a diagnosis/);
   assert.ok("error" in parseScan({ ...body, vin: "123" }));

@@ -1,9 +1,11 @@
 // v1.6.18: Bay Scan scanner endpoint. Auth: Authorization: Bearer <BAYSCAN_DEVICE_KEY entry> + x-bayscan-device: <deviceId>.
 // This key is accepted ONLY here (no other route reads BAYSCAN_DEVICE_KEY); TECH_BOARD_BOT_KEY / READER_API_KEY are not accepted here.
 import { runtimeEnv } from "@/app/lib/runtime";
+import { r2Bucket } from "@/app/lib/r2";
 import { DEVICE_HEADER, deviceAuth, matchScanVin, parseScan, scanReply } from "@/app/tech-board/bayscan";
 import { attachScan } from "@/app/tech-board/bayscan-attach";
-import { initializeTechBoard, loadRoVins, loadSyncedRos, saveScan, techBoardDb } from "@/app/tech-board/store";
+import { publishBayScanAttachment } from "@/app/tech-board/bayscan-jobs";
+import { initializeTechBoard, loadRoVins, loadSyncedRos, saveScan, setRoVin, techBoardDb } from "@/app/tech-board/store";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -21,6 +23,13 @@ export async function POST(request: Request) {
   const { matches, by, unknownVin } = matchScanVin(scan.vin, await loadSyncedRos(db), await loadRoVins(db));
   const match = matches.length === 1 ? matches[0] : null;
   const id = await saveScan(db as never, scan, match?.ro ?? "", matches.length, now);
-  if (match) await attachScan(db, scan, match, `Bay Scan ${scan.deviceId}`, now);
+  if (match) {
+    const by = `Bay Scan ${scan.deviceId}`;
+    await attachScan(db, scan, match, by, now);
+    if (!(await loadRoVins(db)).get(match.ro)) await setRoVin(db as never, match.ro, scan.vin, by, now);
+    // Same JSON as before. A failed report job is retried by the cron / the next reader sync.
+    try { await publishBayScanAttachment(db as never, { scanId: id, scan, ro: match, now }, r2Bucket(env)); }
+    catch (error) { console.error("bayscan report job failed", error); }
+  }
   return Response.json({ ...scanReply(match, id), matchedBy: match ? by : null, openRosWithoutVin: unknownVin });
 }

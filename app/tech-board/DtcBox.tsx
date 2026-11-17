@@ -4,6 +4,8 @@ import { useState } from "react";
 import { IdentifixRequestBox } from "./IdentifixPanel";
 import type { IdentifixRequest } from "./identifix";
 import { CHECKIN_LABEL, IDENTIFIX_URL, dtcClipboardText, normalizeDtcs, type Checkin } from "./dtc";
+import { codeDescription } from "./bayscan-codes";
+import { tekAttachLabel, type RoScanView, type ScanModule } from "./bayscan";
 
 async function lookup(codes: string[], vehicle: string, setMsg: (value: string) => void) {
   const text = dtcClipboardText(codes, vehicle);
@@ -25,23 +27,49 @@ export default function DtcBox({ vehicle }: { vehicle: string }) {
   );
 }
 
-/** Check-in scan list (read-only), each code with its Identifix lookup. */
-export function CheckinList({ checkin, vehicle }: { checkin?: Checkin | null; vehicle: string }) {
+/** Every module the scanner talked to, including modules that came back with no codes. */
+export function ScanModules({ modules, readiness = "" }: { modules?: ScanModule[]; readiness?: string }) {
+  const list = modules ?? [];
+  if (!list.length && !readiness) return null;
+  return (
+    <div className="tb-scan-mods" data-testid="scan-modules">
+      {list.map((module, index) => (
+        <div key={`${module.addr}-${module.name}-${index}`} className="tb-scan-mod">
+          <strong>{module.name || "Module"}{module.addr ? ` · ${module.addr}` : ""}</strong>
+          {module.codes.length
+            ? <ul>{module.codes.map((code) => {
+              const description = codeDescription(code.code, code.desc);
+              return <li key={`${code.code}-${code.status}`}><b>{code.code}</b> <span>{code.status}</span>{description ? ` — ${description}` : ""}</li>;
+            })}</ul>
+            : <span className="tb-scan-clean">No codes</span>}
+        </div>
+      ))}
+      {readiness ? <p className="tb-scan-ready">Readiness: {readiness}</p> : null}
+    </div>
+  );
+}
+
+/** Check-in scan list (read-only), each code with its Identifix lookup, plus the per-module Bay Scan. */
+export function CheckinList({ checkin, vehicle, bayScan = null }: { checkin?: Checkin | null; vehicle: string; bayScan?: RoScanView | null }) {
   const [msg, setMsg] = useState("");
-  if (!checkin || (!checkin.codes.length && !checkin.notes)) return null;
+  const hasCheckin = Boolean(checkin && (checkin.codes.length || checkin.notes));
+  if (!hasCheckin && !bayScan) return null;
+  const tek = bayScan ? tekAttachLabel(bayScan.tekStatus, bayScan.tekError) : "";
   return (
     <div className="tb-checkin" data-testid="checkin-list">
       <small>{CHECKIN_LABEL}</small>
-      <ul>{checkin.codes.map((code) => <li key={code}><strong>{code}</strong> <button type="button" onClick={() => void lookup([code], vehicle, setMsg)}>Identifix →</button></li>)}</ul>
-      {checkin.notes && <p className="tb-checkin-notes">{checkin.notes}</p>}
+      {bayScan ? <p className="tb-scan-link"><a href={`/bayscan/report/${bayScan.id}`}>Bay Scan report</a>{tek ? <span className={`tb-tek tb-tek-${bayScan.tekStatus}`}>{tek}</span> : null}</p> : null}
+      {checkin && checkin.codes.length > 0 && <ul>{checkin.codes.map((code) => <li key={code}><strong>{code}</strong> <button type="button" onClick={() => void lookup([code], vehicle, setMsg)}>Identifix →</button></li>)}</ul>}
+      {bayScan ? <ScanModules modules={bayScan.modules} readiness={bayScan.readinessSummary} /> : null}
+      {checkin?.notes && <p className="tb-checkin-notes">{checkin.notes}</p>}
       {msg && <small className="tb-dtc-msg">{msg}</small>}
     </div>
   );
 }
 
 /** Writer: the ONE check-in codes box (v1.6.18 merged the Identifix box's separate code field into this one) + VIN. */
-export function CheckinEditor({ ro, checkin, vehicle, onSave, readOnly, customer = "", request, vin: savedVin = "" }: { ro: string; checkin?: Checkin | null; vehicle: string;
-  customer?: string; request?: IdentifixRequest | null; vin?: string; onSave: (body: Record<string, unknown>) => Promise<unknown> | void; readOnly: boolean }) {
+export function CheckinEditor({ ro, checkin, vehicle, onSave, readOnly, customer = "", request, vin: savedVin = "", bayScan = null }: { ro: string; checkin?: Checkin | null; vehicle: string;
+  customer?: string; request?: IdentifixRequest | null; vin?: string; bayScan?: RoScanView | null; onSave: (body: Record<string, unknown>) => Promise<unknown> | void; readOnly: boolean }) {
   const [codes, setCodes] = useState(checkin?.codes.join(" ") ?? "");
   const [notes, setNotes] = useState(checkin?.notes ?? "");
   const [vin, setVin] = useState(savedVin);
@@ -54,7 +82,7 @@ export function CheckinEditor({ ro, checkin, vehicle, onSave, readOnly, customer
       <button type="button" disabled={readOnly} onClick={() => void onSave({ action: "checkin-set", ro, codes: parsed, notes })}>Save check-in scan</button>
       <label className="tb-comment">VIN (Bay Scan matches scans to this RO by VIN)<input value={vin} maxLength={17} placeholder="17 characters" onChange={(event) => setVin(event.target.value)} /></label>
       <button type="button" disabled={readOnly || vinClean === savedVin || (vinClean.length > 0 && vinClean.length !== 17)} onClick={() => void onSave({ action: "ro-vin-set", ro, vin: vinClean })}>Save VIN</button>
-      <CheckinList checkin={checkin} vehicle={vehicle} />
+      <CheckinList checkin={checkin} vehicle={vehicle} bayScan={bayScan} />
       {/* v1.6.17: the writer button queues a lookup for the assistant. v1.6.18: it uses the codes typed above (no second code box). */}
       <IdentifixRequestBox key={`ix-${request?.id ?? 0}`} ro={ro} customer={customer} vehicle={vehicle} codes={parsed} vin={vinClean} request={request} onSave={onSave} readOnly={readOnly} />
     </div>

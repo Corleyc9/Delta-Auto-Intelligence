@@ -7,9 +7,10 @@ import SuggestionBox from "./SuggestionBox";
 import ScheduleRequestBox from "./ScheduleRequestBox";
 import type { Suggestion } from "./suggestions";
 import type { ScheduleRequest } from "./schedule-requests";
-import { searchRos } from "./ro-search";
+import { searchRos, vinsMatch } from "./ro-search";
 import { ApptDetails, apptSummary } from "./ApptDetails";
-import { CheckinEditor } from "./DtcBox";
+import { CheckinEditor, ScanModules } from "./DtcBox";
+import type { RoScanView, ScanModule } from "./bayscan";
 import { checkinRo, type Checkin } from "./dtc";
 import { latestByRo, requestStatusText, type IdentifixRequest } from "./identifix";
 import { DIAG_END, blockRo, LUNCH_END, LUNCH_START, cardSpan, clampStart, dayWallLimit, isLockedJob, isStalled, wallEnd } from "./scheduler";
@@ -21,7 +22,8 @@ type Job = {
   durationMinutes: number; pinned: boolean; placedBy: "auto" | "writer"; status: "preset" | "diag" | "part-arrived" | "ready" | "custom" | "waiting" | "front-office"; inDiagBlock: boolean;
   title?: string; note?: string; custom?: boolean; linkedRo?: string | null; carriedOver?: boolean; roNumber?: string; jobName?: string; jobOrder?: number; durationOverrideMinutes?: number | null; loggedSeconds?: number | null; apptKey?: string | null; apptInfo?: string | null; autoPlaced?: boolean; needsPlacing?: string | null;
 };
-export type SyncedRo = { ro: string; customer: string; vehicle: string; label: string; hours: number; detailUrl: string };
+export type SyncedRo = { ro: string; customer: string; vehicle: string; label: string; hours: number; detailUrl: string; vin?: string; section?: string; status?: string };
+export type { RoScanView };
 type Update = { ro: string; kind: string; percentComplete: number | null; comment: string; createdAt: string };
 type TimeOff = { id: number; initials: string; date: string; startMinute: number; endMinute: number; allDay: boolean; reason: string; createdBy?: string };
 type PoolRequest = { id: number; ro: string; tech: string; status: string; note: string; createdAt: string };
@@ -29,9 +31,9 @@ export type Board = {
   today: string; days: string[]; date: string; techs: Tech[]; jobs: Job[]; unassigned: string; updates?: Update[];
   timeOff?: TimeOff[]; poolRequests?: PoolRequest[]; syncedRos?: SyncedRo[]; suggestions?: Suggestion[]; scheduleRequests?: ScheduleRequest[]; pinsSet?: string[]; version?: string;
   checkins?: Checkin[]; identifixRequests?: IdentifixRequest[];
-  roVins?: Record<string, string>; unmatchedScans?: UnmatchedScan[];
+  roVins?: Record<string, string>; unmatchedScans?: UnmatchedScan[]; roScans?: Record<string, RoScanView>;
 };
-type UnmatchedScan = { id: number; deviceId: string; vin: string; receivedAt: string; matchCount: number; scan: { modules: { codes: { code: string }[] }[]; odometer: number | null } };
+type UnmatchedScan = { id: number; deviceId: string; vin: string; receivedAt: string; matchCount: number; scan: { modules?: ScanModule[]; odometer: number | null; readinessSummary?: string } };
 
 /** v1.6.18: Bay Scan scans whose VIN matched 0 or 2+ open ROs — a writer picks the RO. */
 function UnmatchedScans({ board, onSave, readOnly }: { board: Board; onSave: Act; readOnly: boolean }) {
@@ -41,16 +43,18 @@ function UnmatchedScans({ board, onSave, readOnly }: { board: Board; onSave: Act
     <div className="tb-requests-head"><h3>Unmatched scans</h3></div>
     {scans.length === 0 ? <p className="tb-empty">Every Bay Scan scan is on an RO.</p>
       : <ul className="tb-list tb-unmatched" data-testid="unmatched-scans">{scans.map((item) => {
-        const codes = [...new Set(item.scan.modules.flatMap((m) => m.codes.map((c) => c.code)))];
+        const modules = item.scan.modules ?? [];
+        const codes = [...new Set(modules.flatMap((m) => m.codes.map((c) => c.code)))];
         return (<li key={item.id}><i style={{ background: "#c0392b" }} /><div><strong>VIN {item.vin}</strong>
-          <span>{item.deviceId} · {new Date(item.receivedAt).toLocaleString("en-US", { timeZone: "America/Chicago" })} · {item.matchCount > 1 ? `${item.matchCount} open ROs have this VIN` : "no open RO has this VIN"} · {codes.length ? codes.join(" ") : "no codes"}</span>
-          <RoPicker ros={board.syncedRos ?? []} value={pick[item.id] ?? null} onPick={(ro) => setPick((prev) => ({ ...prev, [item.id]: ro?.ro ?? "" }))} /></div>
+          <span>{item.deviceId} · {new Date(item.receivedAt).toLocaleString("en-US", { timeZone: "America/Chicago" })} · {item.matchCount > 1 ? `${item.matchCount} open ROs have this VIN` : "no open RO has this VIN"} · {codes.length ? codes.join(" ") : "no codes"} · <a href={`/bayscan/report/${item.id}`}>Report</a></span>
+          <ScanModules modules={modules} readiness={item.scan.readinessSummary} />
+          <RoPicker ros={board.syncedRos ?? []} vins={board.roVins} pinVin={item.vin} value={pick[item.id] ?? null} onPick={(ro) => setPick((prev) => ({ ...prev, [item.id]: ro?.ro ?? "" }))} /></div>
           <button className="tb-approve" disabled={readOnly || !pick[item.id]} onClick={() => onSave({ action: "bayscan-attach", id: item.id, ro: pick[item.id] })}>Attach</button>
           <button disabled={readOnly} onClick={() => onSave({ action: "bayscan-dismiss", id: item.id })}>Dismiss</button></li>);
       })}</ul>}
   </>);
 }
-type Act = (body: Record<string, unknown>) => Promise<void>;
+type Act = (body: Record<string, unknown>) => Promise<unknown>;
 
 const PX = 1.4; // px per minute, vertical
 const ISSUES = ["Need parts", "Wrong part", "Need help", "Waiting approval", "Found more work", "Done", "Diag Done"];
@@ -66,24 +70,27 @@ const jobTitle = (job: Job) => job.custom
   : `${roTitle(job.customer, job.roNumber || job.ro)}${job.jobName ? ` · ${job.jobName}` : ""}`;
 export const hoursText = (minutes: number) => `${(Math.round(minutes / 6) / 10).toFixed(1)}h`;
 
-/** Type-ahead over the synced Tekmetric ROs (number, customer, vehicle). Read-only: picking only links the block. */
-export function RoPicker({ ros, value, onPick, autoFocus = false }: { ros: SyncedRo[]; value: string | null; onPick: (ro: SyncedRo | null) => void; autoFocus?: boolean }) {
+/** Every synced Tekmetric RO, scrollable. Open / work-in-progress first, then newest. Search filters. A scan VIN pins matches. */
+export function RoPicker({ ros, value, onPick, autoFocus = false, pinVin = "", vins }: { ros: SyncedRo[]; value: string | null; onPick: (ro: SyncedRo | null) => void; autoFocus?: boolean; pinVin?: string; vins?: Record<string, string> }) {
   const current = ros.find((item) => item.ro === value);
-  const [query, setQuery] = useState(current ? `${current.customer} · RO#${current.ro}` : value ? `RO#${value}` : "");
+  const selected = current ? `${current.customer} · RO#${current.ro}` : value ? `RO#${value}` : "";
+  const [query, setQuery] = useState(selected);
   const [open, setOpen] = useState(false);
-  const q = query.toLowerCase().replace(/^ro#?/, "").trim();
-  const matches = searchRos(ros, q, 8);
+  const filtering = query.trim() !== "" && query !== selected;
+  const listed = ros.map((item) => ({ ...item, vin: vins?.[item.ro] || item.vin || "" }));
+  const matches = searchRos(listed, filtering ? query : "", Number.POSITIVE_INFINITY, pinVin);
   return (
     <div className="tb-ro-picker">
-      <input value={query} autoFocus={autoFocus} placeholder="Search RO#, customer or vehicle" aria-label="RO search"
+      <input value={query} autoFocus={autoFocus} placeholder="Search RO#, customer or vehicle — or scroll all ROs" aria-label="RO search"
         onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
         onChange={(event) => { setQuery(event.target.value); setOpen(true); if (!event.target.value) onPick(null); }} />
       {value && <button type="button" className="tb-ro-clear" onClick={() => { setQuery(""); onPick(null); }} aria-label="Unlink RO">×</button>}
       {open && matches.length > 0 && <ul className="tb-ro-list" role="listbox">{matches.map((item) => (
-        <li key={item.ro} role="option" aria-selected={item.ro === value} onMouseDown={(event) => { event.preventDefault(); setQuery(`${item.customer} · RO#${item.ro}`); setOpen(false); onPick(item); }}>
-          <strong>{item.customer || "—"} · RO#{item.ro}</strong><span>{item.vehicle}{item.hours ? ` · ${item.hours.toFixed(1)}h` : ""}{item.label ? ` · ${item.label}` : ""}</span>
+        <li key={item.ro} role="option" aria-selected={item.ro === value} className={pinVin && vinsMatch(pinVin, item.vin) ? "tb-ro-pin" : undefined} onMouseDown={(event) => { event.preventDefault(); setQuery(`${item.customer} · RO#${item.ro}`); setOpen(false); onPick(item); }}>
+          <strong>{item.customer || "—"} · RO#{item.ro}{pinVin && vinsMatch(pinVin, item.vin) ? " · VIN match" : ""}</strong><span>{item.vehicle}{item.hours ? ` · ${item.hours.toFixed(1)}h` : ""}{item.label ? ` · ${item.label}` : ""}</span>
         </li>))}</ul>}
-      {open && q && matches.length === 0 && <ul className="tb-ro-list"><li className="tb-ro-none">No synced RO matches “{query}”.</li></ul>}
+      {open && filtering && matches.length === 0 && <ul className="tb-ro-list"><li className="tb-ro-none">No synced RO matches “{query}”.</li></ul>}
+      {open && !filtering && matches.length === 0 && <ul className="tb-ro-list"><li className="tb-ro-none">No synced ROs yet.</li></ul>}
     </div>
   );
 }
@@ -127,8 +134,8 @@ function EditBlock({ job, techs, days, dayStart, limit, unassigned, onSave, read
   );
 }
 
-function TicketDrawer({ job, latest, onClose, onSave, readOnly, techs, days, dayStart, limit, unassigned, ros, checkin, identifix, vin = "" }: {
-  checkin?: Checkin | null; identifix?: IdentifixRequest | null; vin?: string;
+function TicketDrawer({ job, latest, onClose, onSave, readOnly, techs, days, dayStart, limit, unassigned, ros, checkin, identifix, vin = "", bayScan = null }: {
+  checkin?: Checkin | null; identifix?: IdentifixRequest | null; vin?: string; bayScan?: RoScanView | null;
   job: Job; latest?: Update; onClose: () => void; readOnly: boolean; onSave: Act;
   techs: Tech[]; days: string[]; dayStart: number; limit: number; unassigned: string; ros: SyncedRo[];
 }) {
@@ -160,7 +167,7 @@ function TicketDrawer({ job, latest, onClose, onSave, readOnly, techs, days, day
           {job.status === "preset" && <p className="tb-pinned-note">Pre-Set appointment: held at its set time. Drag it to change the time.</p>}
           {job.placedBy === "writer" && job.status !== "preset" && <p className="tb-pinned-note">Moved by a writer (kept as a preference) <button disabled={readOnly} onClick={() => onSave({ action: "unpin", ro: job.ro })}>Let the scheduler place it</button></p>}
           {job.detailUrl ? <a className="tb-link" href={job.detailUrl} target="_blank" rel="noreferrer">Open in Tekmetric →</a> : <span className="tb-link disabled">Tekmetric link unavailable</span>}
-          <CheckinEditor key={`ck-${checkin?.updatedAt ?? ""}`} ro={checkinRo(job)} checkin={checkin} vehicle={job.vehicle} customer={job.customer ?? ""} request={identifix} vin={vin} onSave={onSave} readOnly={readOnly} />
+          <CheckinEditor key={`ck-${checkin?.updatedAt ?? ""}-${bayScan?.id ?? 0}-${bayScan?.tekStatus ?? ""}`} ro={checkinRo(job)} checkin={checkin} vehicle={job.vehicle} customer={job.customer ?? ""} request={identifix} vin={vin} bayScan={bayScan} onSave={onSave} readOnly={readOnly} />
           <div className="tb-section"><small>Status</small>
             <div className="tb-issues">{ISSUES.map((issue) => <button key={issue} className={kind === issue ? "active" : ""} disabled={readOnly} onClick={() => { setKind(issue); save(issue); }}>{issue}</button>)}</div>
           </div>
@@ -553,7 +560,8 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
       {openJob && <TicketDrawer key={openJob.ro} job={openJob} latest={latest(openJob.ro)} readOnly={Boolean(initial)} onClose={() => setOpenRo(null)}
         onSave={async (body) => { await act(body); if (body.action === "delete") setOpenRo(null); }}
         techs={techs} days={board.days} dayStart={dayStart} limit={dayMinutes} unassigned={board.unassigned} ros={board.syncedRos ?? []} checkin={(board.checkins ?? []).find((item) => item.ro === checkinRo(openJob))}
-        identifix={latestByRo(board.identifixRequests ?? []).get(checkinRo(openJob)) ?? null} vin={board.roVins?.[checkinRo(openJob)] ?? ""} />}
+        identifix={latestByRo(board.identifixRequests ?? []).get(checkinRo(openJob)) ?? null} vin={board.roVins?.[checkinRo(openJob)] ?? ""}
+        bayScan={board.roScans?.[checkinRo(openJob)] ?? null} />}
       {addSlot && <AddForm slot={addSlot} board={view} dayStart={dayStart} limit={dayMinutes} onClose={() => setAddSlot(null)} onSave={act} readOnly={Boolean(initial)} />}
     </section>
   );

@@ -206,5 +206,11 @@ export async function POST(request: Request) {
   }
   // Tech Board: re-run the auto-scheduler on every sync. Never fail the sync over it.
   try { await recomputeTechBoard(env.DB as never, repairOrders); } catch (error) { console.error("tech-board recompute failed", error); }
+  // Bay Scan: a VIN that just showed up on an open RO attaches the waiting scan. Never fail the sync over it.
+  try {
+    const { runBayScanMaintenance } = await import("@/app/tech-board/bayscan-maintain");
+    const { r2Bucket } = await import("@/app/lib/r2");
+    await runBayScanMaintenance(env.DB, r2Bucket(env));
+  } catch (error) { console.error("bayscan rematch failed", error); }
   return Response.json({ ok: true, count: repairOrders.length, capturedAt }, { status: 201 });
 }
