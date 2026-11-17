@@ -213,7 +213,7 @@ test("manual attach, routes, and cron stay inside the Bay Scan rules", () => {
   assert.ok(src("../app/tech-board/DtcBox.tsx").includes("Bay Scan report"));
   const panel = src("../app/tech-board/TechBoardPanel.tsx");
   assert.ok(panel.includes("/bayscan/report/"));
-  assert.match(src("../app/lib/version.ts"), /"v1\.6\.21"/);
+  assert.match(src("../app/lib/version.ts"), /"v1\.6\.22"/);
 });
 
 test("giving up after the attempt cap is a failed status the board can show", async () => {

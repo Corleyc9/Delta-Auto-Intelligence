@@ -10,7 +10,8 @@ import type { ScheduleRequest } from "./schedule-requests";
 import { searchRos, vinsMatch } from "./ro-search";
 import { ApptDetails, apptSummary } from "./ApptDetails";
 import { CheckinEditor, ScanModules } from "./DtcBox";
-import type { RoScanView, ScanModule } from "./bayscan";
+import { ScanPhotos } from "./ScanPhotos";
+import type { RoScanView, ScanModule, ScanPhotoView } from "./bayscan";
 import { checkinRo, type Checkin } from "./dtc";
 import { latestByRo, requestStatusText, type IdentifixRequest } from "./identifix";
 import { DIAG_END, blockRo, LUNCH_END, LUNCH_START, cardSpan, clampStart, dayWallLimit, isLockedJob, isStalled, wallEnd } from "./scheduler";
@@ -33,7 +34,7 @@ export type Board = {
   checkins?: Checkin[]; identifixRequests?: IdentifixRequest[];
   roVins?: Record<string, string>; unmatchedScans?: UnmatchedScan[]; roScans?: Record<string, RoScanView>;
 };
-type UnmatchedScan = { id: number; deviceId: string; vin: string; receivedAt: string; matchCount: number; scan: { modules?: ScanModule[]; odometer: number | null; readinessSummary?: string } };
+type UnmatchedScan = { id: number; deviceId: string; vin: string; receivedAt: string; matchCount: number; scan: { modules?: ScanModule[]; odometer: number | null; readinessSummary?: string }; photos?: ScanPhotoView[]; photoRequest?: "" | "pending" | "claimed" };
 
 /** v1.6.18: Bay Scan scans whose VIN matched 0 or 2+ open ROs — a writer picks the RO. */
 function UnmatchedScans({ board, onSave, readOnly }: { board: Board; onSave: Act; readOnly: boolean }) {
@@ -47,6 +48,7 @@ function UnmatchedScans({ board, onSave, readOnly }: { board: Board; onSave: Act
         const codes = [...new Set(modules.flatMap((m) => m.codes.map((c) => c.code)))];
         return (<li key={item.id}><i style={{ background: "#c0392b" }} /><div><strong>VIN {item.vin}</strong>
           <span>{item.deviceId} · {new Date(item.receivedAt).toLocaleString("en-US", { timeZone: "America/Chicago" })} · {item.matchCount > 1 ? `${item.matchCount} open ROs have this VIN` : "no open RO has this VIN"} · {codes.length ? codes.join(" ") : "no codes"} · <a href={`/bayscan/report/${item.id}`}>Report</a></span>
+          <ScanPhotos photos={item.photos} pending={item.photoRequest === "pending" || item.photoRequest === "claimed"} />
           <ScanModules modules={modules} readiness={item.scan.readinessSummary} />
           <RoPicker ros={board.syncedRos ?? []} vins={board.roVins} pinVin={item.vin} value={pick[item.id] ?? null} onPick={(ro) => setPick((prev) => ({ ...prev, [item.id]: ro?.ro ?? "" }))} /></div>
           <button className="tb-approve" disabled={readOnly || !pick[item.id]} onClick={() => onSave({ action: "bayscan-attach", id: item.id, ro: pick[item.id] })}>Attach</button>
@@ -167,7 +169,7 @@ function TicketDrawer({ job, latest, onClose, onSave, readOnly, techs, days, day
           {job.status === "preset" && <p className="tb-pinned-note">Pre-Set appointment: held at its set time. Drag it to change the time.</p>}
           {job.placedBy === "writer" && job.status !== "preset" && <p className="tb-pinned-note">Moved by a writer (kept as a preference) <button disabled={readOnly} onClick={() => onSave({ action: "unpin", ro: job.ro })}>Let the scheduler place it</button></p>}
           {job.detailUrl ? <a className="tb-link" href={job.detailUrl} target="_blank" rel="noreferrer">Open in Tekmetric →</a> : <span className="tb-link disabled">Tekmetric link unavailable</span>}
-          <CheckinEditor key={`ck-${checkin?.updatedAt ?? ""}-${bayScan?.id ?? 0}-${bayScan?.tekStatus ?? ""}`} ro={checkinRo(job)} checkin={checkin} vehicle={job.vehicle} customer={job.customer ?? ""} request={identifix} vin={vin} bayScan={bayScan} onSave={onSave} readOnly={readOnly} />
+          <CheckinEditor key={`ck-${checkin?.updatedAt ?? ""}-${bayScan?.id ?? 0}-${bayScan?.tekStatus ?? ""}-${bayScan?.photos?.map((photo) => photo.id).join(",") ?? ""}-${bayScan?.photoRequest ?? ""}`} ro={checkinRo(job)} checkin={checkin} vehicle={job.vehicle} customer={job.customer ?? ""} request={identifix} vin={vin} bayScan={bayScan} onSave={onSave} readOnly={readOnly} />
           <div className="tb-section"><small>Status</small>
             <div className="tb-issues">{ISSUES.map((issue) => <button key={issue} className={kind === issue ? "active" : ""} disabled={readOnly} onClick={() => { setKind(issue); save(issue); }}>{issue}</button>)}</div>
           </div>

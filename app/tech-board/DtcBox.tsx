@@ -6,6 +6,7 @@ import type { IdentifixRequest } from "./identifix";
 import { CHECKIN_LABEL, IDENTIFIX_URL, dtcClipboardText, normalizeDtcs, type Checkin } from "./dtc";
 import { codeDescription } from "./bayscan-codes";
 import { tekAttachLabel, type RoScanView, type ScanModule } from "./bayscan";
+import { ScanPhotos } from "./ScanPhotos";
 
 async function lookup(codes: string[], vehicle: string, setMsg: (value: string) => void) {
   const text = dtcClipboardText(codes, vehicle);
@@ -59,6 +60,7 @@ export function CheckinList({ checkin, vehicle, bayScan = null }: { checkin?: Ch
     <div className="tb-checkin" data-testid="checkin-list">
       <small>{CHECKIN_LABEL}</small>
       {bayScan ? <p className="tb-scan-link"><a href={`/bayscan/report/${bayScan.id}`}>Bay Scan report</a>{tek ? <span className={`tb-tek tb-tek-${bayScan.tekStatus}`}>{tek}</span> : null}</p> : null}
+      {bayScan ? <ScanPhotos photos={bayScan.photos} pending={bayScan.photoRequest === "pending" || bayScan.photoRequest === "claimed"} /> : null}
       {checkin && checkin.codes.length > 0 && <ul>{checkin.codes.map((code) => <li key={code}><strong>{code}</strong> <button type="button" onClick={() => void lookup([code], vehicle, setMsg)}>Identifix →</button></li>)}</ul>}
       {bayScan ? <ScanModules modules={bayScan.modules} readiness={bayScan.readinessSummary} /> : null}
       {checkin?.notes && <p className="tb-checkin-notes">{checkin.notes}</p>}

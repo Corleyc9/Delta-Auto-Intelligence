@@ -4,7 +4,7 @@ import { jobsFromPayload, normalizeJobs } from "./ro-jobs";
 import { ensureEvents, recordBoardNotice, recordTekmetricChanges } from "./events";
 import { sendInstant } from "./teams-notify";
 import { IDENTIFIX_REQUESTS_SQL } from "./identifix-store.ts";
-import { BAYSCAN_ALTER, BAYSCAN_SQL } from "./bayscan-store.ts";
+import { BAYSCAN_ALTER, BAYSCAN_SQL, ensureBayScanJobShape } from "./bayscan-store.ts";
 import { BOARD_SUGGESTIONS_SQL, rowToSuggestion } from "./suggestions";
 import { BOARD_SCHEDULE_REQUESTS_SQL, rowToScheduleRequest, type ScheduleRequest } from "./schedule-requests";
 import { BoardJob, BoardRepairOrder, DEFAULT_TECHS, ExistingRow, TechCapacity, toTekSchedule, TimeOff, UNASSIGNED, chicagoDate, schedule, Appointment, JobProgress, appointmentMinute, chicagoMinute, parentRoOf } from "./scheduler";
@@ -147,6 +147,7 @@ export async function initializeTechBoard(db: D1) {
     await db.prepare(`ALTER TABLE board_jobs ADD COLUMN ${column}`).run().catch(() => undefined);
   }
   for (const sql of BAYSCAN_ALTER) await db.prepare(sql).run().catch(() => undefined);
+  await ensureBayScanJobShape(db as never).catch((error) => console.error("bayscan job shape failed", error));
   await db.batch(DEFAULT_TECHS.map((tech) => db.prepare(`INSERT OR IGNORE INTO tech_capacity
     (initials, name, day_minutes, diag_block_minutes, day_start_minute, active, sort_order) VALUES (?, ?, ?, ?, ?, 1, ?)`)
     .bind(tech.initials, tech.name, tech.dayMinutes, tech.diagBlockMinutes, tech.dayStartMinute, tech.sortOrder)));

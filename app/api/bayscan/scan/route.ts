@@ -1,10 +1,10 @@
 // v1.6.18: Bay Scan scanner endpoint. Auth: Authorization: Bearer <BAYSCAN_DEVICE_KEY entry> + x-bayscan-device: <deviceId>.
-// This key is accepted ONLY here (no other route reads BAYSCAN_DEVICE_KEY); TECH_BOARD_BOT_KEY / READER_API_KEY are not accepted here.
+// This key is accepted ONLY here and on /api/bayscan/photo-request. TECH_BOARD_BOT_KEY / READER_API_KEY are not accepted here.
 import { runtimeEnv } from "@/app/lib/runtime";
 import { r2Bucket } from "@/app/lib/r2";
 import { DEVICE_HEADER, deviceAuth, matchScanVin, parseScan, scanReply } from "@/app/tech-board/bayscan";
 import { attachScan } from "@/app/tech-board/bayscan-attach";
-import { publishBayScanAttachment } from "@/app/tech-board/bayscan-jobs";
+import { enqueueMatchedPhotoJobs, publishBayScanAttachment } from "@/app/tech-board/bayscan-jobs";
 import { initializeTechBoard, loadRoVins, loadSyncedRos, saveScan, setRoVin, techBoardDb } from "@/app/tech-board/store";
 
 export async function POST(request: Request) {
@@ -30,6 +30,8 @@ export async function POST(request: Request) {
     // Same JSON as before. A failed report job is retried by the cron / the next reader sync.
     try { await publishBayScanAttachment(db as never, { scanId: id, scan, ro: match, now }, r2Bucket(env)); }
     catch (error) { console.error("bayscan report job failed", error); }
+    try { await enqueueMatchedPhotoJobs(db as never, id, match, now); }
+    catch (error) { console.error("bayscan photo jobs failed", error); }
   }
   return Response.json({ ...scanReply(match, id), matchedBy: match ? by : null, openRosWithoutVin: unknownVin });
 }

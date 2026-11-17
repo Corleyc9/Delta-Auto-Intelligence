@@ -15,18 +15,27 @@ export function chicagoWhen(iso: string) {
   return date.toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" });
 }
 
-/** yyyymmdd-hhmm in America/Chicago, for BayScan-RO<ro>-<stamp>.pdf. */
-export function chicagoStamp(iso: string) {
+/** yyyymmdd-hhmm in America/Chicago, for BayScan-RO<ro>-<stamp>.pdf. Photos add seconds (yyyymmdd-hhmmss). */
+export function chicagoStamp(iso: string, withSeconds = false) {
   const date = new Date(iso);
   const when = Number.isNaN(date.getTime()) ? new Date() : date;
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    ...(withSeconds ? { second: "2-digit" as const } : {}),
   }).formatToParts(when);
   const get = (type: string) => (parts.find((part) => part.type === type)?.value || "").replace(/\D/g, "");
   let hour = get("hour").slice(-2).padStart(2, "0");
   if (hour === "24") hour = "00";
-  return `${get("year")}${get("month").padStart(2, "0")}${get("day").padStart(2, "0")}-${hour}${get("minute").padStart(2, "0")}`;
+  const second = withSeconds ? get("second").slice(-2).padStart(2, "0") : "";
+  return `${get("year")}${get("month").padStart(2, "0")}${get("day").padStart(2, "0")}-${hour}${get("minute").padStart(2, "0")}${second}`;
+}
+
+/** Stable Tekmetric filename. Unmatched photos use BayScan-scan<id> until an RO is known. */
+export function photoFilename(scanId: number, photoId: number, capturedAt: string, ro = "") {
+  const number = String(ro || "").replace(/\D/g, "");
+  const who = number ? `RO${number}` : `scan${scanId}`;
+  return `BayScan-${who}-photo-${chicagoStamp(capturedAt, true)}-${photoId}.jpg`;
 }
 
 export function reportFilename(ro: string, scannedAt: string, ext: "pdf" | "html" = "pdf") {

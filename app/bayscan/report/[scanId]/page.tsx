@@ -1,14 +1,15 @@
 import { getDashboardUser } from "@/app/chatgpt-auth";
-import { tekAttachLabel } from "@/app/tech-board/bayscan";
+import { tekAttachLabel, type ScanPhotoView } from "@/app/tech-board/bayscan";
 import { buildReport, type BayScanReport } from "@/app/tech-board/bayscan-report";
-import { getScan } from "@/app/tech-board/bayscan-store";
+import { getScan, listActivePhotoRequests, listPhotosForScan } from "@/app/tech-board/bayscan-store";
+import { ScanPhotos } from "@/app/tech-board/ScanPhotos";
 import { initializeTechBoard, loadSyncedRos, techBoardDb } from "@/app/tech-board/store";
 import PrintButton from "../PrintButton";
 import ReportLogin from "../ReportLogin";
 
 export const dynamic = "force-dynamic";
 
-function ReportDocument({ report, tek }: { report: BayScanReport; tek: string }) {
+function ReportDocument({ report, tek, photos, pending }: { report: BayScanReport; tek: string; photos: ScanPhotoView[]; pending: boolean }) {
   return (
     <main className="bayscan-report">
       <style>{`
@@ -23,6 +24,8 @@ function ReportDocument({ report, tek }: { report: BayScanReport; tek: string })
         .bayscan-report th { background: #f2f2f2; }
         .bayscan-actions { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
         .bayscan-print, .bayscan-back { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #222; background: #fff; color: #111; cursor: pointer; text-decoration: none; }
+        .bayscan-report .tb-scan-photos a { width: 120px; }
+        .bayscan-report .tb-scan-photos img { width: 120px; height: 90px; border: 1px solid #222; background: #f2f2f2; }
         .bayscan-missing { max-width: 640px; margin: 48px auto; color: #f4f7fa; }
         @media print {
           body { background: #fff !important; color: #000 !important; }
@@ -47,6 +50,7 @@ function ReportDocument({ report, tek }: { report: BayScanReport; tek: string })
         {report.readiness && <><dt>Readiness</dt><dd>{report.readiness}</dd></>}
         {tek && <><dt>Tekmetric</dt><dd>{tek}</dd></>}
       </dl>
+      <ScanPhotos photos={photos} pending={pending} />
       <table>
         <thead><tr><th>Module</th><th>Address</th><th>Code</th><th>Status</th><th>Description</th></tr></thead>
         <tbody>
@@ -81,5 +85,7 @@ export default async function BayScanReportPage({ params }: { params: Promise<{ 
   const ros = await loadSyncedRos(db);
   const matched = stored.ro ? ros.find((item) => item.ro === stored.ro) : undefined;
   const report = buildReport(stored.scan, { scanId: stored.id, ro: stored.ro, customer: matched?.customer || "", vehicle: matched?.vehicle || "" });
-  return <ReportDocument report={report} tek={tekAttachLabel(stored.tekStatus, stored.tekError)} />;
+  const photos = (await listPhotosForScan(db as never, stored.id)).map((photo) => ({ id: photo.id, attachStatus: photo.attachStatus, attachError: photo.attachError }));
+  const pending = (await listActivePhotoRequests(db as never)).some((row) => row.scanId === stored.id && photos.length === 0);
+  return <ReportDocument report={report} tek={tekAttachLabel(stored.tekStatus, stored.tekError)} photos={photos} pending={pending} />;
 }
