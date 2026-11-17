@@ -1,5 +1,5 @@
 // v1.6.18: Bay Scan scanner boxes (Pi + OBDLink). Pure (no React/Cloudflare) so it is unit-testable.
-// Scoped device key BAYSCAN_DEVICE_KEY is accepted ONLY by POST /api/bayscan/scan — it grants nothing else.
+// Scoped device key BAYSCAN_DEVICE_KEY is accepted ONLY by POST /api/bayscan/scan and /api/bayscan/photo-request.
 // A scan is triage, not a diagnosis. Board D1 only — never Tekmetric.
 import { normalizeDtcs } from "./dtc.ts";
 
@@ -56,8 +56,11 @@ export type ScanCode = { code: string; status: string; desc: string };
 export type ScanModule = { name: string; addr: string; codes: ScanCode[] };
 export type BayScan = { deviceId: string; vin: string; odometer: number | null; protocol: string; scannedAt: string; battery: number | null;
   modules: ScanModule[]; milOn: boolean; readinessSummary: string };
+/** One check-in photo stored for a scan, as the board shows it. */
+export type ScanPhotoView = { id: number; attachStatus: string; attachError: string };
 /** Latest Bay Scan attached to an RO, as the ticket drawer shows it. */
-export type RoScanView = { id: number; tekStatus: string; tekError: string; modules: ScanModule[]; readinessSummary: string };
+export type RoScanView = { id: number; tekStatus: string; tekError: string; modules: ScanModule[]; readinessSummary: string;
+  photos?: ScanPhotoView[]; photoRequest?: "" | "pending" | "claimed" };
 
 /** Status text for the Tech Board. Empty when the scan has not been queued for Tekmetric yet. */
 export function tekAttachLabel(status: string, error = "") {

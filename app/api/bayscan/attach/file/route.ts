@@ -2,7 +2,7 @@
 import { botAuth } from "@/app/lib/bot-auth";
 import { r2Bucket } from "@/app/lib/r2";
 import { runtimeEnv } from "@/app/lib/runtime";
-import { readBayScanFile } from "@/app/tech-board/bayscan-jobs";
+import { bayScanFileResponse, readBayScanFile } from "@/app/tech-board/bayscan-jobs";
 import { initializeTechBoard, techBoardDb } from "@/app/tech-board/store";
 
 export async function GET(request: Request) {
@@ -15,12 +15,5 @@ export async function GET(request: Request) {
   await initializeTechBoard(db);
   const file = await readBayScanFile(db as never, id, r2Bucket(env));
   if (!file) return Response.json({ error: "Bay Scan attach job was not found." }, { status: 404 });
-  const filename = file.filename.replace(/[\r\n"]/g, "");
-  return new Response(file.bytes as unknown as BodyInit, {
-    headers: {
-      "content-type": file.contentType,
-      "content-disposition": `attachment; filename="${filename}"`,
-      "cache-control": "private, no-store",
-    },
-  });
+  return bayScanFileResponse(file);
 }

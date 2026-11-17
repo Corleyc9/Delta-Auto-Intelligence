@@ -1,6 +1,6 @@
 // v1.6.21: reader-sync and cron entry. Re-match lives in bayscan-rematch.ts so tests can run it without the scheduler.
 import { r2Bucket } from "../lib/r2.ts";
-import { backfillAttachJobs, rematchUnmatchedScans } from "./bayscan-rematch.ts";
+import { backfillAttachJobs, backfillPhotoJobs, rematchUnmatchedScans } from "./bayscan-rematch.ts";
 import { loadRoVins } from "./bayscan-store.ts";
 import type { OpenRo } from "./bayscan.ts";
 import { initializeTechBoard, loadSyncedRos, techBoardDb } from "./store.ts";
@@ -14,7 +14,8 @@ export async function runBayScanMaintenance(db: Db, bucket?: Bucket, nowIso = ne
   const vins = await loadRoVins(db);
   const attached = await rematchUnmatchedScans(db, ros, vins, nowIso, bucket);
   const queued = await backfillAttachJobs(db, ros, nowIso, bucket);
-  return { attached, queued };
+  const photos = await backfillPhotoJobs(db, ros, nowIso);
+  return { attached, queued, photos };
 }
 
 /** Cron entry. Reader syncs also call runBayScanMaintenance directly. */

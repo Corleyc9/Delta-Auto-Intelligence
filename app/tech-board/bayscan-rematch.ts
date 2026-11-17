@@ -2,9 +2,9 @@
 // Board D1 only. Does not create a Tekmetric repair order.
 import { attachScan } from "./bayscan-attach.ts";
 import { matchScanVin, type OpenRo } from "./bayscan.ts";
-import { publishBayScanAttachment } from "./bayscan-jobs.ts";
+import { enqueueMatchedPhotoJobs, publishBayScanAttachment, publishBayScanPhotoAttachment } from "./bayscan-jobs.ts";
 import {
-  claimScanForRo, getScan, loadRematchScans, loadRoVins, releaseScanClaim, scansMissingJobs, setRoVin,
+  claimScanForRo, getScan, loadRematchScans, loadRoVins, photosMissingJobs, releaseScanClaim, scansMissingJobs, setRoVin,
 } from "./bayscan-store.ts";
 
 type Db = Parameters<typeof loadRoVins>[0];
@@ -26,6 +26,8 @@ export async function commitScanAttach(db: Db, scanId: number, ro: OpenRo, by: s
   if (!(await loadRoVins(db)).get(ro.ro)) await setRoVin(db, ro.ro, scan.vin, by, now);
   try { await publishBayScanAttachment(db, { scanId: scan.id, scan: scan.scan, ro, now }, bucket); }
   catch (error) { console.error("bayscan report job failed", error); }
+  try { await enqueueMatchedPhotoJobs(db, scan.id, ro, now); }
+  catch (error) { console.error("bayscan photo jobs failed", error); }
   return true;
 }
 
@@ -56,6 +58,21 @@ export async function backfillAttachJobs(db: Db, ros: OpenRo[], nowIso: string, 
     const known = byRo.get(scan.ro);
     const ro: OpenRo = known ?? { ro: scan.ro, customer: "", vehicle: "" };
     const published = await publishBayScanAttachment(db, { scanId: scan.id, scan: scan.scan, ro, now: nowIso }, bucket);
+    if (published && !published.reused) queued += 1;
+  }
+  return queued;
+}
+
+/** Photos taken before the scan matched (or whose enqueue failed) get one job, once. */
+export async function backfillPhotoJobs(db: Db, ros: OpenRo[], nowIso: string) {
+  const byRo = new Map(ros.map((item) => [item.ro, item]));
+  let queued = 0;
+  for (const row of await photosMissingJobs(db)) {
+    const scan = await getScan(db, row.scanId);
+    if (!scan?.ro) continue;
+    const known = byRo.get(scan.ro);
+    const ro: OpenRo = known ?? { ro: scan.ro, customer: "", vehicle: "" };
+    const published = await publishBayScanPhotoAttachment(db, { photoId: row.photoId, scanId: scan.id, ro, now: nowIso });
     if (published && !published.reused) queued += 1;
   }
   return queued;
