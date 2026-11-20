@@ -10,3 +10,6 @@ export const CHECKIN_LABEL = "Check-in scan (triage only — not a diagnosis; se
 /** Parent RO number for a board job key ("38528-J2~2" → "38528"). */
 export const checkinRo = (job: { ro: string; roNumber?: string; linkedRo?: string | null; custom?: boolean }) =>
   String((job.custom ? job.linkedRo : job.roNumber) || job.ro).replace(/^(\d+).*$/, "$1");
+
+/** Job names on a card. A merged block stores them as "Oil + Brakes". */
+export const requestedJobLines = (name: unknown) => String(name ?? "").split(/\s+\+\s+/).map((part) => part.trim()).filter(Boolean);

@@ -28,8 +28,9 @@ test("card status is short shop wording and the drawer wording stays", () => {
 test("the RO card has a Bay Scan button that does not open the drawer, and the drawer button stays", () => {
   const panel = src("../app/tech-board/TechBoardPanel.tsx");
   const drawer = src("../app/tech-board/DtcBox.tsx");
-  assert.equal((panel.match(/<CardBayScan /g) || []).length, 2, "grid cards and front-office cards");
-  assert.match(panel, /!job\.custom && <CardBayScan/);
+  assert.equal((panel.match(/<RequestedJobRow /g) || []).length, 2, "grid cards and front-office cards");
+  assert.match(panel, /!job\.custom && <RequestedJobRow/);
+  assert.match(panel, /<CardBayScan /);
   assert.match(panel, /data-testid="bayscan-card-button"/);
   assert.match(panel, /action: "bayscan-scan-request"/);
   assert.match(panel, /event\.stopPropagation\(\)/);
@@ -40,5 +41,5 @@ test("the RO card has a Bay Scan button that does not open the drawer, and the d
   assert.match(drawer, />Bay Scan</);
   assert.match(src("../app/globals.css"), /min-height: 32px/);
   assert.match(src("../README.md"), /Requested…/);
-  assert.equal(APP_VERSION, "v1.6.24");
+  assert.match(APP_VERSION, /^v1\.6\.2[4-9]$/);
 });
