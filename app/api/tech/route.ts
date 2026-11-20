@@ -11,6 +11,8 @@ import { addSuggestion, loadSuggestions } from "@/app/tech-board/store";
 import { recordSuggestionEvent, recordUpdateEvent } from "@/app/tech-board/events";
 import { sendInstant } from "@/app/tech-board/teams-notify";
 import { applyRipple } from "@/app/tech-board/actions";
+import { boardScanRequest, type ScanRequestView } from "@/app/tech-board/bayscan";
+import { createScanRequest, loadScanRequestViews } from "@/app/tech-board/bayscan-request";
 import { loadIdentifixRequests, loadCheckins, initializeTechBoard, loadJobs, loadLatestUpdates, loadPoolRequests, loadTechs, loadTimeOff, pinRow, recomputeTechBoard, techBoardDb } from "@/app/tech-board/store";
 
 // /tech API: a tech signed in with their own PIN sees and changes only their own work.
@@ -54,6 +56,7 @@ async function techPayload(db: Awaited<ReturnType<typeof techBoardDb>>, initials
     timeOff: timeOff.filter((off) => off.initials === initials),
     suggestions: await loadSuggestions(db, initials),
     requests: requests.filter((request) => request.tech === initials).map((request) => ({ id: request.id, ro: request.ro, status: request.status, createdAt: request.createdAt })),
+    scanRequest: boardScanRequest(await loadScanRequestViews(db as never, new Date().toISOString())) as ScanRequestView | null,
   };
 }
 
@@ -129,6 +132,11 @@ export async function POST(request: Request) {
     if ("error" in value) return Response.json({ error: value.error }, { status: 400 });
     const sid = await addSuggestion(db, value, stamp);
     await sendInstant(db, await recordSuggestionEvent(db as never, { change: "new", id: sid, submitter: (await loadTechs(db)).find((tech) => tech.initials === initials)?.name || initials, source: "tech", text: value.text, now: stamp }).catch(() => null));
+  } else if (body.action === "bayscan-scan-request") {
+    // Same no-RO Bay Scan as the Tech Board button. A PIN session cannot open the board, so the button lives here too.
+    // No RO is attached. One active request at a time. Does not create an RO.
+    const saved = await createScanRequest(db as never, { ro: "", requestedBy: `Tech ${initials}` }, stamp);
+    if ("error" in saved) return Response.json({ error: saved.error }, { status: saved.status });
   } else if (body.action === "timeoff") {
     // Applies immediately to the tech's own column and shows in the writers' Requests list.
     if (!isDate(body.date) || String(body.date) < today) return Response.json({ error: "Pick today or a later date" }, { status: 400 });

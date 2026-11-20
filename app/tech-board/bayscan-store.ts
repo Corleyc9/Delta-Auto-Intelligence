@@ -43,7 +43,7 @@ export const BAYSCAN_SQL = [
     customer TEXT NOT NULL DEFAULT '', vehicle TEXT NOT NULL DEFAULT '', detail_url TEXT NOT NULL DEFAULT '',
     requested_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, claimed_at TEXT,
     status TEXT NOT NULL DEFAULT 'pending', reason TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '',
-    scan_id INTEGER, vin_mismatch INTEGER NOT NULL DEFAULT 0)`,
+    scan_id INTEGER, vin_mismatch INTEGER NOT NULL DEFAULT 0, matched_ro TEXT NOT NULL DEFAULT '')`,
   `CREATE INDEX IF NOT EXISTS bayscan_scan_requests_status_idx ON bayscan_scan_requests (status, created_at, id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS bayscan_scan_requests_one_active_ro ON bayscan_scan_requests (ro) WHERE status IN ('pending', 'claimed', 'scanning')`,
 ];
@@ -60,6 +60,7 @@ export const BAYSCAN_ALTER = [
   `ALTER TABLE bayscan_photos ADD COLUMN attach_error TEXT NOT NULL DEFAULT ''`,
   `ALTER TABLE board_bayscan_scans ADD COLUMN vin_mismatch INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE board_bayscan_scans ADD COLUMN vin_mismatch_ro TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE bayscan_scan_requests ADD COLUMN matched_ro TEXT NOT NULL DEFAULT ''`,
 ];
 
 export type StoredScan = { id: number; deviceId: string; vin: string; scan: BayScan; ro: string; status: "matched" | "unmatched" | "attached" | "dismissed";

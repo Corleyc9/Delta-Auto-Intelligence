@@ -66,12 +66,20 @@ export type RoScanView = { id: number; tekStatus: string; tekError: string; modu
 /** How often the board refreshes while a Bay Scan request is still in progress. */
 export const SCAN_REQUEST_POLL_MS = 4000;
 export type ScanRequestStatus = "pending" | "claimed" | "scanning" | "done" | "failed" | "expired";
-/** One board-triggered Bay Scan, as the ticket drawer shows it. */
+/** One board-triggered Bay Scan. `ro` is the RO the request was created for (empty when the Tech Board button did not pick one). `matchedRo` is where the scan landed. */
 export type ScanRequestView = {
   id: number; ro: string; roId: string | null; vin: string | null; status: ScanRequestStatus;
   reason: string; message: string; createdAt: string; codeCount: number | null; vinMismatch: boolean;
+  matchedRo: string | null;
 };
 export const scanRequestActive = (status: string) => status === "pending" || status === "claimed" || status === "scanning";
+
+/** The request the single Bay Scan button should show: the active one, otherwise the newest. */
+export function boardScanRequest<T extends { id: number; status: string }>(requests: T[]): T | null {
+  const active = requests.filter((item) => scanRequestActive(item.status)).sort((a, b) => a.id - b.id);
+  if (active.length) return active[0];
+  return [...requests].sort((a, b) => b.id - a.id)[0] ?? null;
+}
 
 const FAILED_REASON: Record<string, string> = {
   no_car_power: "car has no power",
@@ -80,19 +88,36 @@ const FAILED_REASON: Record<string, string> = {
   vin_mismatch: "VIN does not match this RO",
 };
 
-/** Short label on the RO card. The drawer keeps the longer scanRequestStatusText. */
+/** Shop wording beside the one Tech Board Bay Scan button. */
+export function boardScanStatusText(request: { status: string; ro?: string | null; matchedRo?: string | null; reason?: string; message?: string }) {
+  if (request.status === "pending") return "Requested…";
+  if (request.status === "claimed" || request.status === "scanning") return "Scanning…";
+  if (request.status === "expired") return "Expired";
+  if (request.status === "done") {
+    const saved = String(request.matchedRo || "").replace(/\D/g, "");
+    if (saved) return `Done — saved to RO ${saved}`;
+    const asked = String(request.ro || "").replace(/\D/g, "");
+    return asked ? `Done — saved to RO ${asked}` : "Done — no matching RO, sent to Unmatched";
+  }
+  if (request.status === "failed") return failedStatusText(request);
+  return "";
+}
+
+/** Short label kept for an RO-bound request. The board button uses boardScanStatusText. */
 export function scanRequestCardText(request: { status: string; reason?: string; message?: string }) {
   if (request.status === "pending") return "Requested…";
   if (request.status === "claimed" || request.status === "scanning") return "Scanning…";
   if (request.status === "done") return "Done";
   if (request.status === "expired") return "Expired";
-  if (request.status === "failed") {
-    const reason = String(request.reason || "").trim().toLowerCase();
-    if (reason === "no_dongle") return "Failed: dongle not found";
-    const plain = FAILED_REASON[reason] || String(request.message || "").trim() || reason.replace(/_/g, " ");
-    return plain ? `Failed: ${plain}` : "Failed";
-  }
+  if (request.status === "failed") return failedStatusText(request);
   return "";
+}
+
+function failedStatusText(request: { reason?: string; message?: string }) {
+  const reason = String(request.reason || "").trim().toLowerCase();
+  if (reason === "no_dongle") return "Failed: dongle not found";
+  const plain = FAILED_REASON[reason] || String(request.message || "").trim() || reason.replace(/_/g, " ");
+  return plain ? `Failed: ${plain}` : "Failed";
 }
 
 /** Shop wording for the ticket drawer. "Dongle" here is the Bay Scan dongle. */

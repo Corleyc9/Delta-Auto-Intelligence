@@ -294,11 +294,13 @@ test("device routes reject a bad key and do not take the bot key", async () => {
   const status = src("../app/api/bayscan/scan-request/status/route.ts");
   assert.ok(status.indexOf("deviceAuth(") < status.indexOf("postScanRequestStatus("));
   const drawer = src("../app/tech-board/DtcBox.tsx");
-  assert.match(drawer, />Bay Scan</);
-  assert.match(drawer, /Bay Scan dongle/);
-  assert.match(drawer, /bayscan-scan-request/);
+  assert.equal(drawer.includes("bayscan-request-button"), false);
+  assert.equal(drawer.includes("bayscan-scan-request"), false);
   assert.equal(drawer.includes("ViaBecs"), false);
   const panel = src("../app/tech-board/TechBoardPanel.tsx");
+  assert.match(panel, /data-testid="bayscan-board-button"/);
+  assert.match(panel, /action: "bayscan-scan-request"/);
+  assert.equal(panel.includes("bayscan-card-button"), false);
   assert.match(panel, /SCAN_REQUEST_POLL_MS/);
   assert.match(panel, /60000/);
   assert.equal(SCAN_REQUEST_POLL_MS, 4000);

@@ -1,4 +1,6 @@
-// v1.6.23: the Tech Board asks the shop Mac to run the Bay Scan dongle for one RO.
+// v1.6.23: the Tech Board asks the shop Mac to run the Bay Scan dongle.
+// v1.6.26: the one board button queues a request with no RO. The scan then VIN-matches like a Pi scan.
+// An RO on the request still attaches to that RO (the listener sends the same payload either way).
 // Board D1 only. Never creates an RO and never approves, authorizes, sends, or pays.
 import {
   matchScanVin, normalizeVin, scanCodes, scanReply, validVin, type BayScan, type OpenRo, type ScanRequestStatus, type ScanRequestView,
@@ -21,7 +23,7 @@ const clip = (value: unknown, max: number) => String(value ?? "").trim().slice(0
 export type ScanRequestRow = {
   id: number; ro: string; roId: string; vin: string; customer: string; vehicle: string; detailUrl: string;
   requestedBy: string; createdAt: string; updatedAt: string; claimedAt: string; status: string;
-  reason: string; message: string; scanId: number; vinMismatch: boolean;
+  reason: string; message: string; scanId: number; vinMismatch: boolean; matchedRo: string;
 };
 
 export function roIdFromDetailUrl(url: unknown) {
@@ -60,11 +62,12 @@ function mapRow(row: Record<string, unknown>): ScanRequestRow {
     requestedBy: String(row.requested_by || ""), createdAt: String(row.created_at || ""), updatedAt: String(row.updated_at || ""),
     claimedAt: String(row.claimed_at || ""), status: String(row.status || ""), reason: String(row.reason || ""),
     message: String(row.message || ""), scanId: Number(row.scan_id || 0), vinMismatch: Number(row.vin_mismatch || 0) === 1,
+    matchedRo: String(row.matched_ro || ""),
   };
 }
 
 function claimShape(row: ScanRequestRow) {
-  return { id: row.id, ro: row.ro, roId: row.roId || null, vin: row.vin || null };
+  return { id: row.id, ro: row.ro || null, roId: row.roId || null, vin: row.vin || null };
 }
 
 function before(nowIso: string, ms: number) {
@@ -91,12 +94,25 @@ async function activeForRo(db: Db, ro: string) {
   return row ? mapRow(row) : null;
 }
 
-/** A second press for an RO that already has an active request returns that request. */
-export async function createScanRequest(db: Db, input: { ro: string; roId?: string; vin?: string; customer?: string; vehicle?: string; detailUrl?: string; requestedBy?: string }, nowIso: string) {
+async function oldestActive(db: Db) {
+  const row = await db.prepare(`SELECT * FROM bayscan_scan_requests WHERE status IN ('pending', 'claimed', 'scanning') ORDER BY created_at ASC, id ASC LIMIT 1`)
+    .first<Record<string, unknown>>();
+  return row ? mapRow(row) : null;
+}
+
+/**
+ * A second press while any request is still active returns that request.
+ * An empty RO is the Tech Board button: the Mac scans first, then the VIN is matched.
+ * A non-empty RO keeps the v1.6.23 path (one active request per RO).
+ */
+export async function createScanRequest(db: Db, input: { ro?: string; roId?: string; vin?: string; customer?: string; vehicle?: string; detailUrl?: string; requestedBy?: string }, nowIso: string) {
   await expireScanRequests(db, nowIso);
   const ro = String(input.ro || "").replace(/\D/g, "").slice(0, 20);
-  if (!ro) return { error: "Bay Scan needs an RO number", status: 400 as const };
-  const existing = await activeForRo(db, ro);
+  if (!ro) {
+    const active = await oldestActive(db);
+    if (active) return { request: active, created: false as const };
+  }
+  const existing = ro ? await activeForRo(db, ro) : null;
   if (existing) return { request: existing, created: false as const };
   const vin = normalizeVin(input.vin || "");
   try {
@@ -106,7 +122,7 @@ export async function createScanRequest(db: Db, input: { ro: string; roId?: stri
       .bind(ro, String(input.roId || "").replace(/\D/g, "").slice(0, 20), validVin(vin) ? vin : "",
         clip(input.customer, 120), clip(input.vehicle, 160), clip(input.detailUrl, 1000), clip(input.requestedBy, 120), nowIso, nowIso).run();
   } catch {
-    const raced = await activeForRo(db, ro);
+    const raced = ro ? await activeForRo(db, ro) : await oldestActive(db);
     if (raced) return { request: raced, created: false as const };
     return { error: "Scan request could not be saved", status: 500 as const };
   }
@@ -170,7 +186,8 @@ export async function loadScanRequestViews(db: Db, nowIso: string): Promise<Scan
   const newest = new Map<string, ScanRequestRow>();
   for (const raw of rows.results) {
     const row = mapRow(raw);
-    if (row.ro && !newest.has(row.ro)) newest.set(row.ro, row);
+    const key = row.ro || "";
+    if (!newest.has(key)) newest.set(key, row);
   }
   const views: ScanRequestView[] = [];
   for (const row of newest.values()) {
@@ -182,7 +199,7 @@ export async function loadScanRequestViews(db: Db, nowIso: string): Promise<Scan
     const status = (OPEN.includes(row.status) || row.status === "done" || row.status === "failed" || row.status === "expired" ? row.status : "expired") as ScanRequestStatus;
     views.push({
       id: row.id, ro: row.ro, roId: row.roId || null, vin: row.vin || null, status, reason: row.reason, message: row.message,
-      createdAt: row.createdAt, codeCount, vinMismatch: row.vinMismatch,
+      createdAt: row.createdAt, codeCount, vinMismatch: row.vinMismatch, matchedRo: row.matchedRo || null,
     });
   }
   return views;
@@ -235,8 +252,15 @@ export async function saveMatchedBayScan(db: Db, scan: BayScan, match: OpenRo | 
   return id;
 }
 
+async function finishScanRequest(db: Db, requestId: number, scanId: number, matchedRo: string, vinMismatch: boolean, now: string) {
+  await db.prepare(`UPDATE bayscan_scan_requests SET status = 'done', scan_id = ?, matched_ro = ?, vin_mismatch = ?, updated_at = ? WHERE id = ? AND status IN ('pending', 'claimed', 'scanning')`)
+    .bind(scanId, matchedRo, vinMismatch ? 1 : 0, now, requestId).run();
+}
+
 /**
- * scanRequestId path. The clicked RO wins. A VIN that belongs to a different open RO is flagged
+ * scanRequestId path.
+ * No RO on the request: same VIN / unique-last-6 match as a Pi scan. Zero or 2+ matches stay unmatched.
+ * An RO on the request: that RO wins. A VIN that belongs to a different open RO is flagged
  * on the saved scan and in the check-in notes, and the RO's stored VIN is left alone.
  */
 export async function receiveRequestedScan(db: Db, scan: BayScan, requestId: number, ctx: { ros: OpenRo[]; writerVins: Map<string, string>; now: string; bucket?: Bucket }) {
@@ -244,6 +268,13 @@ export async function receiveRequestedScan(db: Db, scan: BayScan, requestId: num
   const request = await getScanRequest(db, requestId);
   if (!request) return Response.json({ error: "Scan request was not found" }, { status: 404 });
   if (!OPEN.includes(request.status)) return Response.json({ error: "Scan request is not open" }, { status: 409 });
+  if (!request.ro) {
+    const { matches, by, unknownVin } = matchScanVin(scan.vin, ctx.ros, ctx.writerVins);
+    const match = matches.length === 1 ? matches[0] : null;
+    const id = await saveMatchedBayScan(db, scan, match, matches.length, ctx.now, ctx.bucket);
+    await finishScanRequest(db, request.id, id, match?.ro || "", false, ctx.now);
+    return Response.json({ ...scanReply(match, id), matchedBy: match ? by : null, openRosWithoutVin: unknownVin, scanRequestId: request.id });
+  }
   const { matches, unknownVin } = matchScanVin(scan.vin, ctx.ros, ctx.writerVins);
   const others = [...new Set(matches.map((item) => item.ro).filter((ro) => ro !== request.ro))];
   const synced = ctx.ros.find((item) => item.ro === request.ro);
@@ -262,7 +293,6 @@ export async function receiveRequestedScan(db: Db, scan: BayScan, requestId: num
   await attachScan(db, scan, ro, by, ctx.now, true, vinMismatchNote(scan.vin, others));
   if (!others.length && !(await loadRoVins(db)).get(request.ro)) await setRoVin(db, request.ro, scan.vin, by, ctx.now);
   await queueScanOutputs(db, scan, ro, id, ctx.now, ctx.bucket);
-  await db.prepare(`UPDATE bayscan_scan_requests SET status = 'done', scan_id = ?, vin_mismatch = ?, updated_at = ? WHERE id = ? AND status IN ('pending', 'claimed', 'scanning')`)
-    .bind(id, others.length ? 1 : 0, ctx.now, request.id).run();
+  await finishScanRequest(db, request.id, id, request.ro, others.length > 0, ctx.now);
   return Response.json({ ...scanReply(ro, id), matchedBy: "request", openRosWithoutVin: unknownVin, vinMismatch: others.length > 0, scanRequestId: request.id });
 }

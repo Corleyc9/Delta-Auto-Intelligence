@@ -1,5 +1,6 @@
 // v1.6.18: Bay Scan scanner endpoint. Auth: Authorization: Bearer <BAYSCAN_DEVICE_KEY entry> + x-bayscan-device: <deviceId>.
-// v1.6.23: optional scanRequestId attaches the scan to the RO that was clicked on the board.
+// v1.6.23: optional scanRequestId attaches the scan to the RO on that request.
+// v1.6.26: a request with no RO uses the same VIN / unique-last-6 match as a scan with no request.
 // This key is accepted ONLY here, on /api/bayscan/photo-request, and on /api/bayscan/scan-request/*.
 // TECH_BOARD_BOT_KEY / READER_API_KEY are not accepted here.
 import { runtimeEnv } from "@/app/lib/runtime";

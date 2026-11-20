@@ -230,13 +230,21 @@ async function runBoardAction(db: BoardDb, body: Record<string, unknown> & { act
       notice = `Scan attached to RO#${number} as a check-in scan.`;
     }
   } else if (body.action === "bayscan-scan-request") {
-    // v1.6.23: anyone signed in to the board (including the shared Lobby TV login) can ask the Mac to scan this RO.
-    // No extra role gate. Does not create an RO.
-    const target = scanRequestTarget(body.ro, await loadSyncedRos(db), await loadJobs(db), (await loadRoVins(db as never)).get(String(body.ro || "").replace(/\D/g, "")) || "");
-    if ("error" in target) return Response.json({ error: target.error }, { status: target.status });
-    const saved = await createScanRequest(db as never, { ...target, requestedBy: auth.displayName }, now);
-    if ("error" in saved) return Response.json({ error: saved.error }, { status: saved.status });
-    notice = saved.created ? `Bay Scan requested for RO#${target.ro}. Waiting for the Mac.` : `Bay Scan is already requested for RO#${target.ro}.`;
+    // v1.6.26: the Tech Board button asks the Mac to scan with no RO. VIN matching happens after the scan.
+    // Anyone signed in can press it, including the shared Lobby TV login. A tech PIN session uses /api/tech.
+    // No extra role gate. Does not create an RO. An RO on the body keeps the older per-RO request working.
+    const digits = String(body.ro || "").replace(/\D/g, "");
+    if (!digits) {
+      const saved = await createScanRequest(db as never, { ro: "", requestedBy: auth.displayName }, now);
+      if ("error" in saved) return Response.json({ error: saved.error }, { status: saved.status });
+      notice = saved.created ? "Bay Scan requested. Waiting for the Mac." : "Bay Scan is already in progress.";
+    } else {
+      const target = scanRequestTarget(body.ro, await loadSyncedRos(db), await loadJobs(db), (await loadRoVins(db as never)).get(digits) || "");
+      if ("error" in target) return Response.json({ error: target.error }, { status: target.status });
+      const saved = await createScanRequest(db as never, { ...target, requestedBy: auth.displayName }, now);
+      if ("error" in saved) return Response.json({ error: saved.error }, { status: saved.status });
+      notice = saved.created ? `Bay Scan requested for RO#${target.ro}. Waiting for the Mac.` : `Bay Scan is already requested for RO#${target.ro}.`;
+    }
   } else if (body.action === "checkin-set") {
     // v1.6.15: check-in scan codes for an RO (writer or Teams bot). Board only; triage, not a diagnosis.
     const ro = String(body.ro || "").replace(/\D/g, "");

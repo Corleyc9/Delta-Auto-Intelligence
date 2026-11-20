@@ -230,19 +230,39 @@ npx wrangler secret put BAYSCAN_DEVICE_KEY
 
 Do not put the secret value in git, logs, or the dashboard.
 
-## Bay Scan from the Tech Board (v1.6.23)
+## Bay Scan from the Tech Board (v1.6.26)
 
-Anyone signed in to the Tech Board, including the shared Lobby TV login, can press **Bay Scan** on an RO. v1.6.24 puts that button on each RO card on the board, so the ticket does not have to be open. v1.6.25 moves it off the top of the card and onto the requested-job row at the bottom, next to the job name, on tech lanes, the Unassigned column, and the front-office rows. The card button is a small touch target. Tapping it does not open the drawer. The card shows **Requested…**, **Scanning…**, **Done**, or **Failed** with the reason. The board still polls every 4 seconds only while a request is active, and every 60 seconds otherwise. The same button stays in the ticket drawer.
+There is one **Bay Scan** button, in the Tech Board page header (above the day toolbar). It is not on RO cards and not in the ticket drawer. Anyone signed in to the Tech Board can press it, including the shared Lobby TV login. A tech PIN session cannot open the Tech Board, so the same button is on `/tech` and posts to `/api/tech`. No extra role gate. Pressing it does not create an RO.
 
-Pressing it stores one scan request. Pressing again while that request is still active (`pending`, `claimed`, or `scanning`) returns the same row. The shop Mac listens in the background, claims the oldest pending request, runs the Bay Scan dongle, then posts the scan. On success it calls `POST /api/bayscan/photo-request` the same way the handheld did, and that photo lands on the same RO.
+The button stores one scan request with **no RO** (`ro`, `roId`, and `vin` are empty). Pressing again while any request is still active (`pending`, `claimed`, or `scanning`) does not start another one; the status line keeps showing the active request. The board polls every 4 seconds only while a request is active, and every 60 seconds otherwise.
+
+The status line next to the button says:
+
+- `Requested…` while the request is pending
+- `Scanning…` while it is claimed or scanning
+- `Done — saved to RO 38307` when the VIN matched one open RO
+- `Done — no matching RO, sent to Unmatched` when nothing matched (or more than one open RO has that VIN)
+- `Failed: …` with the reason (`dongle not found`, `car has no power`, `no computer found`, `the scan did not upload`)
+
+Unmatched scans stay in the existing **Unmatched scans** list on the Tech Board (under Needs placing, `id="unmatched-scans"`). A writer picks the RO there. The same list is what a Pi scan with no match uses, and those rows keep re-matching when a new open RO gets that VIN.
+
+The shop Mac listens in the background, claims the oldest pending request, runs the Bay Scan dongle, then posts the scan with `scanRequestId`. On success it calls `POST /api/bayscan/photo-request` with that `scanId`. The photo is stored on the scan even when the scan is unmatched. The Tekmetric photo job waits until the scan has an RO (the VIN match, a later re-match, or a writer attach). The photo then follows the scan.
 
 The Mac uses the device auth above. It does not use the Tech Board bot key.
 
 A pending request expires after 5 minutes unclaimed. A claimed or scanning request expires 10 minutes after it was claimed if it is still not `done` or `failed`. Expiry runs on claim, on each board read, and before a `scanRequestId` scan is accepted. Only one request is claimed or scanning at a time.
 
+An RO on the create body still queues the older per-RO request. The listener does not have to change its claim or scan payload.
+
 ### `POST /api/bayscan/scan-request/claim`
 
-`200 { "request": { "id", "ro", "roId", "vin" } }` for the oldest pending request, which is then `claimed`. `roId` and `vin` are JSON `null` when the board does not know them. `200 { "request": null }` when nothing is waiting, or while another request is still `claimed` or `scanning`.
+`200 { "request": { "id", "ro", "roId", "vin" } }` for the oldest pending request, which is then `claimed`. For a Tech Board button request, all three of `ro`, `roId`, and `vin` are JSON `null`:
+
+```json
+{ "request": { "id": 4, "ro": null, "roId": null, "vin": null } }
+```
+
+When the request was created for an RO, `ro` is that RO number string. `roId` and `vin` are JSON `null` when the board does not know them. `200 { "request": null }` when nothing is waiting, or while another request is still `claimed` or `scanning`.
 
 ### `POST /api/bayscan/scan-request/status`
 
@@ -254,11 +274,23 @@ An unknown id is **404**. A missing id, or a status outside that set, is **400**
 
 ### `POST /api/bayscan/scan`
 
-The existing body takes an optional `scanRequestId`. When that id is an open request, the scan is saved on **that** RO (a VIN is still required). If the VIN matches a different open RO, the clicked RO still gets the scan, and the saved scan plus the check-in notes say the VIN does not match. The request is marked `done`. Notes, the PDF, the attach queue, and photo handling then run exactly as they do for a VIN-matched scan.
+The existing body takes an optional `scanRequestId`.
 
-The success body keeps the usual fields (`matched`, `ro`, `customer`, `vehicle`, `scanId`, `display`, `openRosWithoutVin`) and adds `matchedBy: "request"`, `vinMismatch` (boolean), and `scanRequestId`.
+When that id is an open request **with an RO**, the scan is saved on **that** RO (a VIN is still required). If the VIN matches a different open RO, the requested RO still gets the scan, and the saved scan plus the check-in notes say the VIN does not match. The request is marked `done`. Notes, the PDF, the attach queue, and photo handling then run exactly as they do for a VIN-matched scan. The success body keeps the usual fields and adds `matchedBy: "request"`, `vinMismatch` (boolean), and `scanRequestId`.
 
-Without `scanRequestId`, matching stays full VIN, then unique last-6, and the response is unchanged.
+When that id is an open request **with no RO**, matching is the same full-VIN, then unique last-6 path as a scan with no `scanRequestId`. One open RO is saved on that RO. Zero or two-or-more matches are stored as unmatched (the Unmatched scans list). The request is marked `done` and records the matched RO, or records that nothing matched. A matched response:
+
+```json
+{ "matched": true, "ro": "38307", "customer": "Jim Smith", "vehicle": "Sierra", "scanId": 12, "display": "RO 38307 – Smith", "matchedBy": "vin", "openRosWithoutVin": 1, "scanRequestId": 4 }
+```
+
+`matchedBy` is `"vin"` or `"last6"`. An unmatched response:
+
+```json
+{ "matched": false, "ro": null, "customer": null, "vehicle": null, "scanId": 12, "display": "Unmatched – pick on board", "matchedBy": null, "openRosWithoutVin": 1, "scanRequestId": 4 }
+```
+
+Without `scanRequestId`, matching stays full VIN, then unique last-6, and the response is unchanged (no `scanRequestId`).
 
 A `scanRequestId` that is present but not a positive integer is **400** `scanRequestId is invalid` (it does not fall through to VIN matching). An unknown id is **404**. A request that is already `done`, `failed`, or `expired` is **409** `Scan request is not open`.
 

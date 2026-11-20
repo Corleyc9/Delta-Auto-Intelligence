@@ -11,7 +11,7 @@ import { searchRos, vinsMatch } from "./ro-search";
 import { ApptDetails, apptSummary } from "./ApptDetails";
 import { CheckinEditor, ScanModules } from "./DtcBox";
 import { ScanPhotos } from "./ScanPhotos";
-import { SCAN_REQUEST_POLL_MS, scanRequestActive, scanRequestCardText, scanRequestStatusText, type RoScanView, type ScanModule, type ScanPhotoView, type ScanRequestView } from "./bayscan";
+import { SCAN_REQUEST_POLL_MS, boardScanRequest, boardScanStatusText, scanRequestActive, type RoScanView, type ScanModule, type ScanPhotoView, type ScanRequestView } from "./bayscan";
 import { checkinRo, requestedJobLines, type Checkin } from "./dtc";
 import { latestByRo, requestStatusText, type IdentifixRequest } from "./identifix";
 import { DIAG_END, blockRo, LUNCH_END, LUNCH_START, cardSpan, clampStart, dayWallLimit, isLockedJob, isStalled, wallEnd } from "./scheduler";
@@ -42,7 +42,7 @@ function UnmatchedScans({ board, onSave, readOnly }: { board: Board; onSave: Act
   const scans = board.unmatchedScans ?? [];
   const [pick, setPick] = useState<Record<number, string>>({});
   return (<>
-    <div className="tb-requests-head"><h3>Unmatched scans</h3></div>
+    <div className="tb-requests-head" id="unmatched-scans"><h3>Unmatched scans</h3></div>
     {scans.length === 0 ? <p className="tb-empty">Every Bay Scan scan is on an RO.</p>
       : <ul className="tb-list tb-unmatched" data-testid="unmatched-scans">{scans.map((item) => {
         const modules = item.scan.modules ?? [];
@@ -59,40 +59,16 @@ function UnmatchedScans({ board, onSave, readOnly }: { board: Board; onSave: Act
 }
 type Act = (body: Record<string, unknown>) => Promise<unknown>;
 
-/** Small Bay Scan control on the card. Tapping it must not open the ticket. */
-function CardBayScan({ ro, request, disabled, onSave }: { ro: string; request?: ScanRequestView | null; disabled: boolean; onSave: Act }) {
-  const status = request ? scanRequestCardText(request) : "";
-  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
-  return (
-    <span className="tb-card-scan" data-testid="bayscan-card" onClick={stop} onPointerUp={stop} onKeyDown={stop}
-      onPointerDown={(event) => {
-        event.stopPropagation();
-        const card = event.currentTarget.closest<HTMLElement>(".tb-card, .tb-front-card");
-        if (!card) return;
-        card.dataset.nodrag = "1"; card.draggable = false;
-        window.addEventListener("pointerup", () => { delete card.dataset.nodrag; card.draggable = true; }, { once: true });
-      }}>
-      <button type="button" draggable={false} className="tb-card-scan-btn" data-testid="bayscan-card-button" disabled={disabled}
-        aria-label={status ? `Bay Scan for RO ${ro}. ${status}` : `Bay Scan for RO ${ro}`}
-        title={request ? scanRequestStatusText(request) : "Send the Bay Scan dongle to this RO"}
-        onClick={(event) => { event.stopPropagation(); void onSave({ action: "bayscan-scan-request", ro }); }}>
-        Bay Scan
-      </button>
-      {status ? <span className="tb-card-scan-status" data-testid="bayscan-card-status" data-status={request?.status}>{status}</span> : null}
-    </span>
-  );
-}
-
-/** v1.6.25: Bay Scan sits on the requested-job row, at the bottom of the card, not under the vehicle line. */
-function RequestedJobRow({ job, request, disabled, onSave }: { job: Job; request?: ScanRequestView | null; disabled: boolean; onSave: Act }) {
+/** Job names stay on the card. Bay Scan is the one button in the page header, not on the card. */
+function RequestedJobRow({ job }: { job: Job }) {
   if (job.custom) return null;
   const lines = requestedJobLines(job.jobName);
+  if (!lines.length) return null;
   return (
-    <span className="tb-card-jobs" data-testid="bayscan-card-jobs">
-      {lines.length > 0 ? <span className="tb-card-joblist" data-testid="card-job-lines">{lines.map((line, index) => (
+    <span className="tb-card-jobs" data-testid="card-job-lines">
+      {lines.map((line, index) => (
         <span key={`${index}-${line}`} className="tb-card-jobline">{line}</span>
-      ))}</span> : null}
-      <CardBayScan ro={checkinRo(job)} request={request} disabled={disabled} onSave={onSave} />
+      ))}
     </span>
   );
 }
@@ -175,8 +151,8 @@ function EditBlock({ job, techs, days, dayStart, limit, unassigned, onSave, read
   );
 }
 
-function TicketDrawer({ job, latest, onClose, onSave, readOnly, techs, days, dayStart, limit, unassigned, ros, checkin, identifix, vin = "", bayScan = null, scanRequest = null }: {
-  checkin?: Checkin | null; identifix?: IdentifixRequest | null; vin?: string; bayScan?: RoScanView | null; scanRequest?: ScanRequestView | null;
+function TicketDrawer({ job, latest, onClose, onSave, readOnly, techs, days, dayStart, limit, unassigned, ros, checkin, identifix, vin = "", bayScan = null }: {
+  checkin?: Checkin | null; identifix?: IdentifixRequest | null; vin?: string; bayScan?: RoScanView | null;
   job: Job; latest?: Update; onClose: () => void; readOnly: boolean; onSave: Act;
   techs: Tech[]; days: string[]; dayStart: number; limit: number; unassigned: string; ros: SyncedRo[];
 }) {
@@ -208,7 +184,7 @@ function TicketDrawer({ job, latest, onClose, onSave, readOnly, techs, days, day
           {job.status === "preset" && <p className="tb-pinned-note">Pre-Set appointment: held at its set time. Drag it to change the time.</p>}
           {job.placedBy === "writer" && job.status !== "preset" && <p className="tb-pinned-note">Moved by a writer (kept as a preference) <button disabled={readOnly} onClick={() => onSave({ action: "unpin", ro: job.ro })}>Let the scheduler place it</button></p>}
           {job.detailUrl ? <a className="tb-link" href={job.detailUrl} target="_blank" rel="noreferrer">Open in Tekmetric →</a> : <span className="tb-link disabled">Tekmetric link unavailable</span>}
-          <CheckinEditor key={`ck-${checkin?.updatedAt ?? ""}-${bayScan?.id ?? 0}-${bayScan?.tekStatus ?? ""}-${bayScan?.photos?.map((photo) => photo.id).join(",") ?? ""}-${bayScan?.photoRequest ?? ""}`} ro={checkinRo(job)} checkin={checkin} vehicle={job.vehicle} customer={job.customer ?? ""} request={identifix} vin={vin} bayScan={bayScan} scanRequest={scanRequest} onSave={onSave} readOnly={readOnly} />
+          <CheckinEditor key={`ck-${checkin?.updatedAt ?? ""}-${bayScan?.id ?? 0}-${bayScan?.tekStatus ?? ""}-${bayScan?.photos?.map((photo) => photo.id).join(",") ?? ""}-${bayScan?.photoRequest ?? ""}`} ro={checkinRo(job)} checkin={checkin} vehicle={job.vehicle} customer={job.customer ?? ""} request={identifix} vin={vin} bayScan={bayScan} onSave={onSave} readOnly={readOnly} />
           <div className="tb-section"><small>Status</small>
             <div className="tb-issues">{ISSUES.map((issue) => <button key={issue} className={kind === issue ? "active" : ""} disabled={readOnly} onClick={() => { setKind(issue); save(issue); }}>{issue}</button>)}</div>
           </div>
@@ -371,7 +347,8 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
       .then((payload: Board) => { setBoard(payload); setDate((current) => current ?? payload.date); })
       .catch((reason: Error) => setError(reason.message));
   }, [initial]);
-  const scanHot = (board?.scanRequests ?? []).some((item) => scanRequestActive(item.status));
+  const boardRequest = boardScanRequest(board?.scanRequests ?? []);
+  const scanHot = Boolean(boardRequest && scanRequestActive(boardRequest.status));
   useEffect(() => { load(date); const timer = setInterval(() => load(date), scanHot ? SCAN_REQUEST_POLL_MS : 60000); return () => clearInterval(timer); }, [load, date, scanHot]);
 
   async function act(body: Record<string, unknown>) {
@@ -486,18 +463,25 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
           <h2>Tech Board</h2>
           <p>Built day by day from the synced Tekmetric board. 8–10 AM is diag only. Drag a job to move it, drag its bottom edge to resize, tap + to add.</p>
         </div>
-        <div className="job-toolbar tb-toolbar">
-          <div className="tb-search" title="Find any synced Tekmetric RO (even with no approved labor) and add it to the board">
-            <RoPicker ros={board.syncedRos ?? []} value={null} onPick={(item) => { if (item) setAddSlot({ tech: board.unassigned, minute: DIAG_END, ro: item }); }} />
+        <div className="tb-heading-tools">
+          <div className="tb-bayscan-bar" data-testid="bayscan-board">
+            <button type="button" className="tb-bayscan-btn" data-testid="bayscan-board-button" disabled={Boolean(initial) || busy}
+              onClick={() => void act({ action: "bayscan-scan-request" })}>Bay Scan</button>
+            {boardRequest ? <p className="tb-bayscan-status" data-testid="bayscan-board-status" data-status={boardRequest.status} role="status">{boardScanStatusText(boardRequest)}</p> : null}
           </div>
-          <span className="tb-version" title="Build version">Build {board.version ?? APP_VERSION}</span>
-          <button aria-label="Previous day" disabled={dayIndex <= 0} onClick={() => setDate(board.days[dayIndex - 1])}>‹</button>
-          <button onClick={() => setDate(board.today && board.days.includes(board.today) ? board.today : board.days[0])}>Today</button>
-          <button aria-label="Next day" disabled={dayIndex >= board.days.length - 1} onClick={() => setDate(board.days[dayIndex + 1])}>›</button>
-          <select value={day} onChange={(event) => setDate(event.target.value)}>
-            {board.days.map((value) => <option key={value} value={value}>{dayLabel(value)}{value === board.today ? " · Today" : ""}</option>)}
-          </select>
-          <button disabled={busy} onClick={() => act({ action: "recompute" })}>{busy ? "Working…" : "Recompute"}</button>
+          <div className="job-toolbar tb-toolbar">
+            <div className="tb-search" title="Find any synced Tekmetric RO (even with no approved labor) and add it to the board">
+              <RoPicker ros={board.syncedRos ?? []} value={null} onPick={(item) => { if (item) setAddSlot({ tech: board.unassigned, minute: DIAG_END, ro: item }); }} />
+            </div>
+            <span className="tb-version" title="Build version">Build {board.version ?? APP_VERSION}</span>
+            <button aria-label="Previous day" disabled={dayIndex <= 0} onClick={() => setDate(board.days[dayIndex - 1])}>‹</button>
+            <button onClick={() => setDate(board.today && board.days.includes(board.today) ? board.today : board.days[0])}>Today</button>
+            <button aria-label="Next day" disabled={dayIndex >= board.days.length - 1} onClick={() => setDate(board.days[dayIndex + 1])}>›</button>
+            <select value={day} onChange={(event) => setDate(event.target.value)}>
+              {board.days.map((value) => <option key={value} value={value}>{dayLabel(value)}{value === board.today ? " · Today" : ""}</option>)}
+            </select>
+            <button disabled={busy} onClick={() => act({ action: "recompute" })}>{busy ? "Working…" : "Recompute"}</button>
+          </div>
         </div>
       </div>
       {error && <p className="tech-board-error">{error}</p>}
@@ -525,7 +509,7 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
                   onDragStart={(event) => { if (event.currentTarget.dataset.nodrag === "1") { event.preventDefault(); return; } event.dataTransfer.setData("text/ro", job.ro); event.dataTransfer.setData("text/offset", "0"); }}>
                   <strong>{job.custom ? jobTitle(job) : roTitle(job.customer, job.roNumber || job.ro)}</strong><span>{job.custom ? job.note : job.vehicle}{!job.custom && job.jobName && /diag/i.test(job.jobName) ? " · Diag done ✓" : ""}</span>
                   {info.chip && <span className="tb-carried" style={{ background: "rgba(255,255,255,.08)", color: info.color, alignSelf: "flex-start" }}>{info.chip}</span>}
-                  {!job.custom && <RequestedJobRow job={job} request={(board.scanRequests ?? []).find((item) => item.ro === checkinRo(job))} disabled={Boolean(initial) || busy} onSave={act} />}
+                  {!job.custom && <RequestedJobRow job={job} />}
                 </div>); })}
             </div>)}
           </Fragment>)}
@@ -554,9 +538,8 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
                 })}
                 {jobs.map((job, index) => {
                   const duration = resizing?.ro === job.ro ? resizing.minutes : job.durationMinutes;
-                  const top = unassigned ? 6 + index * 140 : job.startMinute * PX + 2;
-                  // Floor leaves the requested-job row (name + Bay Scan) visible at the bottom of a short block.
-                  const height = unassigned ? 132 : Math.max(128, Math.min(wallEnd(job.startMinute, duration), dayMinutes) * PX - job.startMinute * PX - 4);
+                  const top = unassigned ? 6 + index * 124 : job.startMinute * PX + 2;
+                  const height = unassigned ? 116 : Math.max(108, Math.min(wallEnd(job.startMinute, duration), dayMinutes) * PX - job.startMinute * PX - 4);
                   const pct = latest(job.ro)?.percentComplete ?? null;
                   const span = cardSpan(job.startMinute, duration);
                   const nowMinute = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes() - dayStart; })();
@@ -588,7 +571,7 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
                           </button>
                         ))}
                       </span>}
-                      {!job.custom && <RequestedJobRow job={job} request={(board.scanRequests ?? []).find((item) => item.ro === checkinRo(job))} disabled={Boolean(initial) || busy} onSave={act} />}
+                      {!job.custom && <RequestedJobRow job={job} />}
                       {!unassigned && <span className="tb-resize" aria-label="Drag to change length" title="Drag to change length" onPointerDown={(event) => startResize(event, job)} onClick={(event) => event.stopPropagation()} />}
                     </div>
                   );
@@ -606,8 +589,7 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
         onSave={async (body) => { await act(body); if (body.action === "delete") setOpenRo(null); }}
         techs={techs} days={board.days} dayStart={dayStart} limit={dayMinutes} unassigned={board.unassigned} ros={board.syncedRos ?? []} checkin={(board.checkins ?? []).find((item) => item.ro === checkinRo(openJob))}
         identifix={latestByRo(board.identifixRequests ?? []).get(checkinRo(openJob)) ?? null} vin={board.roVins?.[checkinRo(openJob)] ?? ""}
-        bayScan={board.roScans?.[checkinRo(openJob)] ?? null}
-        scanRequest={(board.scanRequests ?? []).find((item) => item.ro === checkinRo(openJob)) ?? null} />}
+        bayScan={board.roScans?.[checkinRo(openJob)] ?? null} />}
       {addSlot && <AddForm slot={addSlot} board={view} dayStart={dayStart} limit={dayMinutes} onClose={() => setAddSlot(null)} onSave={act} readOnly={Boolean(initial)} />}
     </section>
   );
