@@ -1087,14 +1087,17 @@ body {
 .tb-pinned-note button { min-height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #15191d; color: #d9dde0; cursor: pointer; font-size: 12px; }
 .tb-label-pill { display: inline-block; padding: 3px 9px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 700; }
 .tb-card-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tb-card-scan { display: flex; align-items: center; gap: 6px; max-width: 100%; position: relative; z-index: 4; }
-.tb-card-scan-btn { min-height: 32px; min-width: 44px; padding: 0 10px; border: 1px solid rgba(23,134,232,.7); border-radius: 8px; background: rgba(23,134,232,.22); color: #d7ecff; font-size: 12px; font-weight: 800; line-height: 1; cursor: pointer; flex: 0 0 auto; }
+.tb-card-jobs { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: auto; min-width: 0; position: relative; z-index: 4; }
+.tb-card-joblist { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.tb-card-jobline { font-size: 11px; font-weight: 700; line-height: 1.25; color: #e7eef5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-card-scan { display: flex; align-items: center; gap: 6px; max-width: 70%; position: relative; z-index: 4; flex: 0 0 auto; }
+.tb-card-scan-btn { min-height: 32px; min-width: 44px; padding: 0 10px; border: 1px solid rgba(23,134,232,.7); border-radius: 8px; background: rgba(23,134,232,.22); color: #d7ecff; font-size: 12px; font-weight: 800; line-height: 1; cursor: pointer; flex: 0 0 auto; touch-action: manipulation; }
 .tb-card-scan-btn:hover:not(:disabled) { background: rgba(23,134,232,.38); }
 .tb-card-scan-btn:disabled { opacity: .55; cursor: default; }
 .tb-card-scan-status { font-size: 11px; font-weight: 700; color: #fcd77a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tb-card-scan-status[data-status="done"] { color: #8ee0b8; }
 .tb-card-scan-status[data-status="failed"], .tb-card-scan-status[data-status="expired"] { color: #f0a8a2; }
-.tb-front-card .tb-card-scan { margin-top: 4px; }
+.tb-front-card .tb-card-jobs { margin-top: 4px; }
 .tb-quick { display: flex; gap: 4px; padding-top: 3px; position: relative; z-index: 3; }
 .tb-quick button { min-width: 34px; height: 20px; padding: 0 5px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--muted); font-size: 10px; font-weight: 700; cursor: pointer; }
 .tb-quick button:hover:not(:disabled) { border-color: var(--steel); color: var(--white); }

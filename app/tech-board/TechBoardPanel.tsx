@@ -12,7 +12,7 @@ import { ApptDetails, apptSummary } from "./ApptDetails";
 import { CheckinEditor, ScanModules } from "./DtcBox";
 import { ScanPhotos } from "./ScanPhotos";
 import { SCAN_REQUEST_POLL_MS, scanRequestActive, scanRequestCardText, scanRequestStatusText, type RoScanView, type ScanModule, type ScanPhotoView, type ScanRequestView } from "./bayscan";
-import { checkinRo, type Checkin } from "./dtc";
+import { checkinRo, requestedJobLines, type Checkin } from "./dtc";
 import { latestByRo, requestStatusText, type IdentifixRequest } from "./identifix";
 import { DIAG_END, blockRo, LUNCH_END, LUNCH_START, cardSpan, clampStart, dayWallLimit, isLockedJob, isStalled, wallEnd } from "./scheduler";
 
@@ -79,6 +79,20 @@ function CardBayScan({ ro, request, disabled, onSave }: { ro: string; request?: 
         Bay Scan
       </button>
       {status ? <span className="tb-card-scan-status" data-testid="bayscan-card-status" data-status={request?.status}>{status}</span> : null}
+    </span>
+  );
+}
+
+/** v1.6.25: Bay Scan sits on the requested-job row, at the bottom of the card, not under the vehicle line. */
+function RequestedJobRow({ job, request, disabled, onSave }: { job: Job; request?: ScanRequestView | null; disabled: boolean; onSave: Act }) {
+  if (job.custom) return null;
+  const lines = requestedJobLines(job.jobName);
+  return (
+    <span className="tb-card-jobs" data-testid="bayscan-card-jobs">
+      {lines.length > 0 ? <span className="tb-card-joblist" data-testid="card-job-lines">{lines.map((line, index) => (
+        <span key={`${index}-${line}`} className="tb-card-jobline">{line}</span>
+      ))}</span> : null}
+      <CardBayScan ro={checkinRo(job)} request={request} disabled={disabled} onSave={onSave} />
     </span>
   );
 }
@@ -508,10 +522,10 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
               {early.filter((job) => job.tech === lane.id && rowOf(job) === minute).map((job) => { const info = roInfo(job); return (
                 <div key={job.ro} role="button" tabIndex={0} draggable className="tb-front-card" style={{ borderLeftColor: info.color }}
                   title={`${job.custom ? job.title : job.label} · ${time}`} onClick={() => setOpenRo(job.ro)} onKeyDown={(event) => { if (event.key === "Enter") setOpenRo(job.ro); }}
-                  onDragStart={(event) => { event.dataTransfer.setData("text/ro", job.ro); event.dataTransfer.setData("text/offset", "0"); }}>
-                  <strong>{jobTitle(job)}</strong><span>{job.custom ? job.note : job.vehicle}{!job.custom && job.jobName && /diag/i.test(job.jobName) ? " · Diag done ✓" : ""}</span>
-                  {!job.custom && <CardBayScan ro={checkinRo(job)} request={(board.scanRequests ?? []).find((item) => item.ro === checkinRo(job))} disabled={Boolean(initial) || busy} onSave={act} />}
+                  onDragStart={(event) => { if (event.currentTarget.dataset.nodrag === "1") { event.preventDefault(); return; } event.dataTransfer.setData("text/ro", job.ro); event.dataTransfer.setData("text/offset", "0"); }}>
+                  <strong>{job.custom ? jobTitle(job) : roTitle(job.customer, job.roNumber || job.ro)}</strong><span>{job.custom ? job.note : job.vehicle}{!job.custom && job.jobName && /diag/i.test(job.jobName) ? " · Diag done ✓" : ""}</span>
                   {info.chip && <span className="tb-carried" style={{ background: "rgba(255,255,255,.08)", color: info.color, alignSelf: "flex-start" }}>{info.chip}</span>}
+                  {!job.custom && <RequestedJobRow job={job} request={(board.scanRequests ?? []).find((item) => item.ro === checkinRo(job))} disabled={Boolean(initial) || busy} onSave={act} />}
                 </div>); })}
             </div>)}
           </Fragment>)}
@@ -540,9 +554,9 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
                 })}
                 {jobs.map((job, index) => {
                   const duration = resizing?.ro === job.ro ? resizing.minutes : job.durationMinutes;
-                  const top = unassigned ? 6 + index * 124 : job.startMinute * PX + 2;
-                  // Floor leaves room for the Bay Scan control on a short block.
-                  const height = unassigned ? 116 : Math.max(108, Math.min(wallEnd(job.startMinute, duration), dayMinutes) * PX - job.startMinute * PX - 4);
+                  const top = unassigned ? 6 + index * 140 : job.startMinute * PX + 2;
+                  // Floor leaves the requested-job row (name + Bay Scan) visible at the bottom of a short block.
+                  const height = unassigned ? 132 : Math.max(128, Math.min(wallEnd(job.startMinute, duration), dayMinutes) * PX - job.startMinute * PX - 4);
                   const pct = latest(job.ro)?.percentComplete ?? null;
                   const span = cardSpan(job.startMinute, duration);
                   const nowMinute = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes() - dayStart; })();
@@ -555,10 +569,9 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
                       onDragStart={(event) => { if (event.currentTarget.dataset.nodrag === "1") { event.preventDefault(); return; } event.dataTransfer.setData("text/ro", job.ro); event.dataTransfer.setData("text/offset", String(event.clientY - event.currentTarget.getBoundingClientRect().top)); }}
                       title={`${job.custom ? job.title : job.label} · ${clock(dayStart, span.start)} – ${clock(dayStart, span.end)}${span.lunch ? " (includes lunch)" : ""}`}>
                       {!unassigned && span.lunch && <span className="tb-card-lunch" aria-hidden="true" style={{ top: span.lunch.offset * PX - 2, height: span.lunch.minutes * PX }}><span>Lunch</span></span>}
-                      <span className="tb-card-ro"><span className="tb-card-title">{jobTitle(job)}</span>{job.carriedOver && <span className="tb-carried" title="Not finished yesterday; remaining time carried over">Carried over</span>}{(() => { const ix = identifixByRo.get(checkinRo(job)); return ix && ix.status !== "done" ? <span className="tb-carried tb-identifix-chip" title="Identifix lookup (assistant)">{requestStatusText(ix)}</span> : ix ? <span className="tb-carried tb-identifix-chip">Identifix ✓</span> : null; })()}{job.autoPlaced && job.placedBy === "auto" && <span className="tb-carried tb-auto" title="The board placed this approved job by itself (posted to Teams)">Auto-placed</span>}{job.tech !== board.unassigned && job.startMinute >= 0 && wallEnd(job.startMinute, job.durationMinutes) > dayWallLimit(480) && <span className="tb-carried tb-overflow" title="Runs past 5 PM — move or shorten something">Past 5 PM</span>}{(job.status === "preset" || isLockedJob(job)) && <span className="tb-carried tb-preset">{isLockedJob(job) ? "🔒 Customer coming" : "Pre-Set"}</span>}{job.custom && roInfo(job).chip && <span className="tb-carried" style={{ background: "rgba(255,255,255,.08)", color: roInfo(job).color }}>{roInfo(job).chip}</span>}{job.status === "waiting" && <span className="tb-carried" style={{ background: "rgba(255,255,255,.08)", color: cardColor(job) }}>{job.label.trim()}</span>}</span>
+                      <span className="tb-card-ro"><span className="tb-card-title">{job.custom ? jobTitle(job) : roTitle(job.customer, job.roNumber || job.ro)}</span>{job.carriedOver && <span className="tb-carried" title="Not finished yesterday; remaining time carried over">Carried over</span>}{(() => { const ix = identifixByRo.get(checkinRo(job)); return ix && ix.status !== "done" ? <span className="tb-carried tb-identifix-chip" title="Identifix lookup (assistant)">{requestStatusText(ix)}</span> : ix ? <span className="tb-carried tb-identifix-chip">Identifix ✓</span> : null; })()}{job.autoPlaced && job.placedBy === "auto" && <span className="tb-carried tb-auto" title="The board placed this approved job by itself (posted to Teams)">Auto-placed</span>}{job.tech !== board.unassigned && job.startMinute >= 0 && wallEnd(job.startMinute, job.durationMinutes) > dayWallLimit(480) && <span className="tb-carried tb-overflow" title="Runs past 5 PM — move or shorten something">Past 5 PM</span>}{(job.status === "preset" || isLockedJob(job)) && <span className="tb-carried tb-preset">{isLockedJob(job) ? "🔒 Customer coming" : "Pre-Set"}</span>}{job.custom && roInfo(job).chip && <span className="tb-carried" style={{ background: "rgba(255,255,255,.08)", color: roInfo(job).color }}>{roInfo(job).chip}</span>}{job.status === "waiting" && <span className="tb-carried" style={{ background: "rgba(255,255,255,.08)", color: cardColor(job) }}>{job.label.trim()}</span>}</span>
                       {apptSummary(job.apptInfo) && <span className="tb-card-appt" title={apptSummary(job.apptInfo)}>📋 {apptSummary(job.apptInfo)}</span>}
                       <span className="tb-card-vehicle">{job.custom ? [job.linkedRo ? job.title || job.vehicle : "", job.note].filter(Boolean).join(" · ") : job.vehicle}{(job.custom ? (job.note || job.linkedRo) : job.vehicle) ? " · " : ""}<span className="tb-card-hours">{hoursText(duration)}{pct !== null && !job.custom ? ` · ${pct}%` : ""}</span>{!unassigned && <span className="tb-card-time"> · {clock(dayStart, span.start)}–{clock(dayStart, span.end)}</span>}{job.loggedSeconds ? <span className="tb-card-logged"> · logged {(job.loggedSeconds / 3600).toFixed(1)}h</span> : null}{stalled && <span className="tb-carried tb-stalled">Running long</span>}</span>
-                      {!job.custom && <CardBayScan ro={checkinRo(job)} request={(board.scanRequests ?? []).find((item) => item.ro === checkinRo(job))} disabled={Boolean(initial) || busy} onSave={act} />}
                       {!job.custom && <span className="tb-quick"
                         onPointerDown={(event) => {
                           // Quick buttons must never start a card drag: disable dragging until the pointer is released anywhere.
@@ -575,6 +588,7 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
                           </button>
                         ))}
                       </span>}
+                      {!job.custom && <RequestedJobRow job={job} request={(board.scanRequests ?? []).find((item) => item.ro === checkinRo(job))} disabled={Boolean(initial) || busy} onSave={act} />}
                       {!unassigned && <span className="tb-resize" aria-label="Drag to change length" title="Drag to change length" onPointerDown={(event) => startResize(event, job)} onClick={(event) => event.stopPropagation()} />}
                     </div>
                   );
