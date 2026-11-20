@@ -1,5 +1,6 @@
 // v1.6.18: Bay Scan scans + RO VINs (board D1 only). v1.6.21 adds the Tekmetric attach-job queue.
 // v1.6.22 adds check-in photos and lets photo attach jobs share that queue.
+// v1.6.23 adds board-triggered scan requests (the Mac listener claims them).
 // Pure so it is unit-testable with node:sqlite.
 import { normalizeStoredScan, type BayScan, type RoScanView, type ScanPhotoView } from "./bayscan.ts";
 type Bound = { run(): Promise<unknown>; first<T = Record<string, unknown>>(): Promise<T | null>; all<T = Record<string, unknown>>(): Promise<{ results: T[] }> };
@@ -10,7 +11,8 @@ export const BAYSCAN_SQL = [
   `CREATE TABLE IF NOT EXISTS board_bayscan_scans (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, vin TEXT NOT NULL, scan_json TEXT NOT NULL,
     ro TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'unmatched', match_count INTEGER NOT NULL DEFAULT 0, received_at TEXT NOT NULL,
     attached_by TEXT NOT NULL DEFAULT '', attached_at TEXT NOT NULL DEFAULT '',
-    tek_status TEXT NOT NULL DEFAULT '', tek_error TEXT NOT NULL DEFAULT '', tek_job_id INTEGER, tek_filename TEXT NOT NULL DEFAULT '', tek_updated_at TEXT NOT NULL DEFAULT '')`,
+    tek_status TEXT NOT NULL DEFAULT '', tek_error TEXT NOT NULL DEFAULT '', tek_job_id INTEGER, tek_filename TEXT NOT NULL DEFAULT '', tek_updated_at TEXT NOT NULL DEFAULT '',
+    vin_mismatch INTEGER NOT NULL DEFAULT 0, vin_mismatch_ro TEXT NOT NULL DEFAULT '')`,
   `CREATE INDEX IF NOT EXISTS board_bayscan_scans_status_idx ON board_bayscan_scans (status, id)`,
   `CREATE TABLE IF NOT EXISTS board_ro_vin (ro TEXT PRIMARY KEY, vin TEXT NOT NULL, set_by TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')`,
   `CREATE TABLE IF NOT EXISTS board_bayscan_jobs (
@@ -35,6 +37,15 @@ export const BAYSCAN_SQL = [
     attach_status TEXT NOT NULL DEFAULT '', attach_error TEXT NOT NULL DEFAULT '',
     UNIQUE(request_id, seq))`,
   `CREATE INDEX IF NOT EXISTS bayscan_photos_scan_idx ON bayscan_photos (scan_id, id)`,
+  // v1.6.23: one board click queues a scan. The Mac claims the oldest pending request, one at a time.
+  `CREATE TABLE IF NOT EXISTS bayscan_scan_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, ro TEXT NOT NULL, ro_id TEXT NOT NULL DEFAULT '', vin TEXT NOT NULL DEFAULT '',
+    customer TEXT NOT NULL DEFAULT '', vehicle TEXT NOT NULL DEFAULT '', detail_url TEXT NOT NULL DEFAULT '',
+    requested_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, claimed_at TEXT,
+    status TEXT NOT NULL DEFAULT 'pending', reason TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '',
+    scan_id INTEGER, vin_mismatch INTEGER NOT NULL DEFAULT 0)`,
+  `CREATE INDEX IF NOT EXISTS bayscan_scan_requests_status_idx ON bayscan_scan_requests (status, created_at, id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS bayscan_scan_requests_one_active_ro ON bayscan_scan_requests (ro) WHERE status IN ('pending', 'claimed', 'scanning')`,
 ];
 /** Columns added after the first Bay Scan release. "duplicate column" on a current table is expected. */
 export const BAYSCAN_ALTER = [
@@ -47,6 +58,8 @@ export const BAYSCAN_ALTER = [
   `ALTER TABLE board_bayscan_jobs ADD COLUMN photo_id INTEGER`,
   `ALTER TABLE bayscan_photos ADD COLUMN attach_status TEXT NOT NULL DEFAULT ''`,
   `ALTER TABLE bayscan_photos ADD COLUMN attach_error TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE board_bayscan_scans ADD COLUMN vin_mismatch INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE board_bayscan_scans ADD COLUMN vin_mismatch_ro TEXT NOT NULL DEFAULT ''`,
 ];
 
 export type StoredScan = { id: number; deviceId: string; vin: string; scan: BayScan; ro: string; status: "matched" | "unmatched" | "attached" | "dismissed";

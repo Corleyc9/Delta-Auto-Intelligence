@@ -33,11 +33,16 @@ test("device key: shared, per-device list and JSON; wrong/missing key and unset 
   const res = deviceAuth("Bearer zz", "bay1", "secret-value"); assert.ok(!(await res.text()).includes("secret-value"));
 });
 
-test("scoped: BAYSCAN_DEVICE_KEY only read by /api/bayscan/scan; that route accepts no other key", () => {
+test("scoped: BAYSCAN_DEVICE_KEY is only read by Bay Scan device routes; the scan route accepts no other key", () => {
   const files = []; const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) walk(p); else if (/\.(ts|tsx)$/.test(f)) files.push(p); } };
   walk(new URL("../app", import.meta.url).pathname); walk(new URL("../worker", import.meta.url).pathname);
   const readers = files.filter((f) => readFileSync(f, "utf8").includes("BAYSCAN_DEVICE_KEY") && !f.endsWith("bayscan.ts"));
-  assert.deepEqual(readers.map((f) => f.split("/app/")[1]).sort(), ["api/bayscan/photo-request/route.ts", "api/bayscan/scan/route.ts"]);
+  assert.deepEqual(readers.map((f) => f.split("/app/")[1]).sort(), [
+    "api/bayscan/photo-request/route.ts",
+    "api/bayscan/scan-request/claim/route.ts",
+    "api/bayscan/scan-request/status/route.ts",
+    "api/bayscan/scan/route.ts",
+  ]);
   const route = src("../app/api/bayscan/scan/route.ts");
   assert.ok(!/env\.(TECH_BOARD_BOT_KEY|READER_API_KEY)/.test(route) && !route.includes("botAuth") && !route.includes("requireApiUser"));
   assert.ok(!src("../app/lib/bot-auth.ts").includes("BAYSCAN"));

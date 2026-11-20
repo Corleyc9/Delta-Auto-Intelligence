@@ -1,11 +1,12 @@
 // v1.6.18: Bay Scan scanner endpoint. Auth: Authorization: Bearer <BAYSCAN_DEVICE_KEY entry> + x-bayscan-device: <deviceId>.
-// This key is accepted ONLY here and on /api/bayscan/photo-request. TECH_BOARD_BOT_KEY / READER_API_KEY are not accepted here.
+// v1.6.23: optional scanRequestId attaches the scan to the RO that was clicked on the board.
+// This key is accepted ONLY here, on /api/bayscan/photo-request, and on /api/bayscan/scan-request/*.
+// TECH_BOARD_BOT_KEY / READER_API_KEY are not accepted here.
 import { runtimeEnv } from "@/app/lib/runtime";
 import { r2Bucket } from "@/app/lib/r2";
 import { DEVICE_HEADER, deviceAuth, matchScanVin, parseScan, scanReply } from "@/app/tech-board/bayscan";
-import { attachScan } from "@/app/tech-board/bayscan-attach";
-import { enqueueMatchedPhotoJobs, publishBayScanAttachment } from "@/app/tech-board/bayscan-jobs";
-import { initializeTechBoard, loadRoVins, loadSyncedRos, saveScan, setRoVin, techBoardDb } from "@/app/tech-board/store";
+import { receiveRequestedScan, saveMatchedBayScan, scanRequestIdFrom } from "@/app/tech-board/bayscan-request";
+import { initializeTechBoard, loadRoVins, loadSyncedRos, techBoardDb } from "@/app/tech-board/store";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -19,19 +20,16 @@ export async function POST(request: Request) {
   const db = await techBoardDb();
   await initializeTechBoard(db);
   const now = new Date().toISOString();
-  // Synced VIN (reader 2.1.3+) first, writer VIN override wins; last-6 fallback only if no full-VIN match.
+  const requestId = scanRequestIdFrom(body);
+  if (requestId === "invalid") return Response.json({ error: "scanRequestId is invalid" }, { status: 400 });
+  if (typeof requestId === "number") {
+    return receiveRequestedScan(db as never, scan, requestId, {
+      ros: await loadSyncedRos(db), writerVins: await loadRoVins(db), now, bucket: r2Bucket(env),
+    });
+  }
+  // No scanRequestId: VIN match, then unique last-6. Unchanged from v1.6.22.
   const { matches, by, unknownVin } = matchScanVin(scan.vin, await loadSyncedRos(db), await loadRoVins(db));
   const match = matches.length === 1 ? matches[0] : null;
-  const id = await saveScan(db as never, scan, match?.ro ?? "", matches.length, now);
-  if (match) {
-    const by = `Bay Scan ${scan.deviceId}`;
-    await attachScan(db, scan, match, by, now);
-    if (!(await loadRoVins(db)).get(match.ro)) await setRoVin(db as never, match.ro, scan.vin, by, now);
-    // Same JSON as before. A failed report job is retried by the cron / the next reader sync.
-    try { await publishBayScanAttachment(db as never, { scanId: id, scan, ro: match, now }, r2Bucket(env)); }
-    catch (error) { console.error("bayscan report job failed", error); }
-    try { await enqueueMatchedPhotoJobs(db as never, id, match, now); }
-    catch (error) { console.error("bayscan photo jobs failed", error); }
-  }
+  const id = await saveMatchedBayScan(db as never, scan, match, matches.length, now, r2Bucket(env));
   return Response.json({ ...scanReply(match, id), matchedBy: match ? by : null, openRosWithoutVin: unknownVin });
 }

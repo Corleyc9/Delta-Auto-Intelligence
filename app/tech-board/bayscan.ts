@@ -1,5 +1,6 @@
 // v1.6.18: Bay Scan scanner boxes (Pi + OBDLink). Pure (no React/Cloudflare) so it is unit-testable.
-// Scoped device key BAYSCAN_DEVICE_KEY is accepted ONLY by POST /api/bayscan/scan and /api/bayscan/photo-request.
+// Scoped device key BAYSCAN_DEVICE_KEY is accepted ONLY by POST /api/bayscan/scan,
+// POST /api/bayscan/photo-request, POST /api/bayscan/scan-request/claim, and POST /api/bayscan/scan-request/status.
 // A scan is triage, not a diagnosis. Board D1 only — never Tekmetric.
 import { normalizeDtcs } from "./dtc.ts";
 
@@ -61,6 +62,42 @@ export type ScanPhotoView = { id: number; attachStatus: string; attachError: str
 /** Latest Bay Scan attached to an RO, as the ticket drawer shows it. */
 export type RoScanView = { id: number; tekStatus: string; tekError: string; modules: ScanModule[]; readinessSummary: string;
   photos?: ScanPhotoView[]; photoRequest?: "" | "pending" | "claimed" };
+
+/** How often the board refreshes while a Bay Scan request is still in progress. */
+export const SCAN_REQUEST_POLL_MS = 4000;
+export type ScanRequestStatus = "pending" | "claimed" | "scanning" | "done" | "failed" | "expired";
+/** One board-triggered Bay Scan, as the ticket drawer shows it. */
+export type ScanRequestView = {
+  id: number; ro: string; roId: string | null; vin: string | null; status: ScanRequestStatus;
+  reason: string; message: string; createdAt: string; codeCount: number | null; vinMismatch: boolean;
+};
+export const scanRequestActive = (status: string) => status === "pending" || status === "claimed" || status === "scanning";
+
+const FAILED_REASON: Record<string, string> = {
+  no_car_power: "car has no power",
+  no_ecu: "no computer found",
+  upload_failed: "the scan did not upload",
+  vin_mismatch: "VIN does not match this RO",
+};
+
+/** Shop wording for the ticket drawer. "Dongle" here is the Bay Scan dongle. */
+export function scanRequestStatusText(request: { status: string; reason?: string; message?: string; codeCount?: number | null; vinMismatch?: boolean }) {
+  if (request.status === "pending") return "Waiting for the Mac";
+  if (request.status === "claimed" || request.status === "scanning") return "Scanning";
+  if (request.status === "expired") return "Expired";
+  if (request.status === "done") {
+    const count = request.codeCount;
+    const base = count == null ? "Done" : count === 0 ? "Done · no codes" : count === 1 ? "Done · 1 code" : `Done · ${count} codes`;
+    return request.vinMismatch ? `${base} · VIN does not match this RO` : base;
+  }
+  if (request.status === "failed") {
+    const reason = String(request.reason || "").trim().toLowerCase();
+    if (reason === "no_dongle") return "Dongle not found";
+    const plain = FAILED_REASON[reason] || String(request.message || "").trim() || reason.replace(/_/g, " ");
+    return plain ? `Failed: ${plain}` : "Failed";
+  }
+  return "";
+}
 
 /** Status text for the Tech Board. Empty when the scan has not been queued for Tekmetric yet. */
 export function tekAttachLabel(status: string, error = "") {

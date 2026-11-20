@@ -1158,6 +1158,9 @@ body {
 .tb-scan-mod ul { list-style: none; padding: 0; margin: 2px 0 0; }
 .tb-scan-mod li span, .tb-scan-clean { opacity: .75; }
 .tb-scan-ready, .tb-scan-link { font-size: 13px; margin: 4px 0; }
+.tb-bayscan-request { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 8px 0 12px; }
+.tb-scan-hint, .tb-scan-request-status { font-size: 13px; margin: 0; }
+.tb-scan-request-status { font-weight: 700; }
 .tb-tek { margin-left: 8px; font-size: 12px; }
 .tb-tek-failed { color: #e06258; }
 .tb-tek-attached { color: #31c48d; }

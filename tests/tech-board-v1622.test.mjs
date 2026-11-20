@@ -265,7 +265,7 @@ test("photo routes keep the device key and the bot key apart, and the board show
   assert.ok(src("../app/tech-board/ScanPhotos.tsx").includes("/bayscan/photo/"));
   assert.equal(photoFilename(9, 4, "2026-11-05T15:00:00.000Z", "38307"), "BayScan-RO38307-photo-20261105-090000-4.jpg");
   assert.equal(photoFilename(9, 4, "2026-11-05T15:00:00.000Z", ""), "BayScan-scan9-photo-20261105-090000-4.jpg");
-  assert.match(src("../app/lib/version.ts"), /"v1\.6\.22"/);
+  assert.match(src("../app/lib/version.ts"), /"v1\.6\.2[2-9]"/);
   const photo = src("../app/tech-board/bayscan-photo.ts");
   assert.ok(!photo.includes("saveCheckin(") && !photo.includes("addIdentifixRequest("));
 });
