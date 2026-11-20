@@ -80,6 +80,21 @@ const FAILED_REASON: Record<string, string> = {
   vin_mismatch: "VIN does not match this RO",
 };
 
+/** Short label on the RO card. The drawer keeps the longer scanRequestStatusText. */
+export function scanRequestCardText(request: { status: string; reason?: string; message?: string }) {
+  if (request.status === "pending") return "Requested…";
+  if (request.status === "claimed" || request.status === "scanning") return "Scanning…";
+  if (request.status === "done") return "Done";
+  if (request.status === "expired") return "Expired";
+  if (request.status === "failed") {
+    const reason = String(request.reason || "").trim().toLowerCase();
+    if (reason === "no_dongle") return "Failed: dongle not found";
+    const plain = FAILED_REASON[reason] || String(request.message || "").trim() || reason.replace(/_/g, " ");
+    return plain ? `Failed: ${plain}` : "Failed";
+  }
+  return "";
+}
+
 /** Shop wording for the ticket drawer. "Dongle" here is the Bay Scan dongle. */
 export function scanRequestStatusText(request: { status: string; reason?: string; message?: string; codeCount?: number | null; vinMismatch?: boolean }) {
   if (request.status === "pending") return "Waiting for the Mac";

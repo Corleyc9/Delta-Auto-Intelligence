@@ -232,7 +232,9 @@ Do not put the secret value in git, logs, or the dashboard.
 
 ## Bay Scan from the Tech Board (v1.6.23)
 
-Anyone signed in to the Tech Board, including the shared Lobby TV login, can press **Bay Scan** on an RO in the ticket drawer. That stores one scan request. Pressing again while that request is still active (`pending`, `claimed`, or `scanning`) returns the same row. The shop Mac listens in the background, claims the oldest pending request, runs the Bay Scan dongle, then posts the scan. On success it calls `POST /api/bayscan/photo-request` the same way the handheld did, and that photo lands on the same RO.
+Anyone signed in to the Tech Board, including the shared Lobby TV login, can press **Bay Scan** on an RO. v1.6.24 puts that button on each RO card on the board, so the ticket does not have to be open. The card button is a small touch target. Tapping it does not open the drawer. The card shows **Requested…**, **Scanning…**, **Done**, or **Failed** with the reason. The board still polls every 4 seconds only while a request is active, and every 60 seconds otherwise. The same button stays in the ticket drawer.
+
+Pressing it stores one scan request. Pressing again while that request is still active (`pending`, `claimed`, or `scanning`) returns the same row. The shop Mac listens in the background, claims the oldest pending request, runs the Bay Scan dongle, then posts the scan. On success it calls `POST /api/bayscan/photo-request` the same way the handheld did, and that photo lands on the same RO.
 
 The Mac uses the device auth above. It does not use the Tech Board bot key.
 
