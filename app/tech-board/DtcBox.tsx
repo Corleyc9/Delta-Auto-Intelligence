@@ -5,7 +5,7 @@ import { IdentifixRequestBox } from "./IdentifixPanel";
 import type { IdentifixRequest } from "./identifix";
 import { CHECKIN_LABEL, IDENTIFIX_URL, dtcClipboardText, normalizeDtcs, type Checkin } from "./dtc";
 import { codeDescription } from "./bayscan-codes";
-import { scanRequestStatusText, tekAttachLabel, type RoScanView, type ScanModule, type ScanRequestView } from "./bayscan";
+import { tekAttachLabel, type RoScanView, type ScanModule } from "./bayscan";
 import { ScanPhotos } from "./ScanPhotos";
 
 async function lookup(codes: string[], vehicle: string, setMsg: (value: string) => void) {
@@ -70,8 +70,8 @@ export function CheckinList({ checkin, vehicle, bayScan = null }: { checkin?: Ch
 }
 
 /** Writer: the ONE check-in codes box (v1.6.18 merged the Identifix box's separate code field into this one) + VIN. */
-export function CheckinEditor({ ro, checkin, vehicle, onSave, readOnly, customer = "", request, vin: savedVin = "", bayScan = null, scanRequest = null }: { ro: string; checkin?: Checkin | null; vehicle: string;
-  customer?: string; request?: IdentifixRequest | null; vin?: string; bayScan?: RoScanView | null; scanRequest?: ScanRequestView | null;
+export function CheckinEditor({ ro, checkin, vehicle, onSave, readOnly, customer = "", request, vin: savedVin = "", bayScan = null }: { ro: string; checkin?: Checkin | null; vehicle: string;
+  customer?: string; request?: IdentifixRequest | null; vin?: string; bayScan?: RoScanView | null;
   onSave: (body: Record<string, unknown>) => Promise<unknown> | void; readOnly: boolean }) {
   const [codes, setCodes] = useState(checkin?.codes.join(" ") ?? "");
   const [notes, setNotes] = useState(checkin?.notes ?? "");
@@ -80,12 +80,6 @@ export function CheckinEditor({ ro, checkin, vehicle, onSave, readOnly, customer
   const vinClean = vin.toUpperCase().replace(/[^A-Z0-9]/g, "");
   return (
     <div className="tb-section tb-checkin-edit" data-testid="checkin-codes"><small>Check-in scan codes (RO#{ro}) · triage, not a diagnosis</small>
-      {/* Anyone signed in can press this, including the shared Lobby TV login. readOnly is only the static preview. */}
-      <div className="tb-bayscan-request" data-testid="bayscan-request">
-        <button type="button" className="tb-primary" data-testid="bayscan-request-button" disabled={readOnly} onClick={() => void onSave({ action: "bayscan-scan-request", ro })}>Bay Scan</button>
-        <p className="tb-scan-hint">Sends the Bay Scan dongle to this RO. The report is filed on this RO&apos;s Bay Scan check-in report.</p>
-        {scanRequest ? <p className="tb-scan-request-status" data-testid="bayscan-request-status" data-status={scanRequest.status}>{scanRequestStatusText(scanRequest)}</p> : null}
-      </div>
       <label className="tb-comment">Codes<input value={codes} placeholder="P0300 P0171 U0100" onChange={(event) => setCodes(event.target.value)} /></label>
       <label className="tb-comment">Freeze frame / notes<textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
       <button type="button" disabled={readOnly} onClick={() => void onSave({ action: "checkin-set", ro, codes: parsed, notes })}>Save check-in scan</button>

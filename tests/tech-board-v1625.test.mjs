@@ -14,25 +14,19 @@ test("merged job names split into the lines shown beside Bay Scan", () => {
   assert.deepEqual(requestedJobLines(null), []);
 });
 
-test("the Bay Scan button sits on the requested-job row, not under the vehicle line", () => {
+test("job names stay on the card and Bay Scan is not on that row", () => {
   const panel = src("../app/tech-board/TechBoardPanel.tsx");
   const css = src("../app/globals.css");
-  const drawer = src("../app/tech-board/DtcBox.tsx");
   assert.equal((panel.match(/<RequestedJobRow /g) || []).length, 2, "tech lanes / unassigned and front office");
-  assert.equal((panel.match(/data-testid="bayscan-card-jobs"/g) || []).length, 1, "one shared row used by every card");
   assert.match(panel, /tb-card-jobline/);
-  assert.match(panel, /<CardBayScan /);
-  assert.match(panel, /event\.stopPropagation\(\)/);
-  assert.match(panel, /action: "bayscan-scan-request"/);
+  assert.equal(panel.includes("<CardBayScan "), false);
+  assert.equal(panel.includes("bayscan-card-button"), false);
+  assert.match(panel, /data-testid="bayscan-board-button"/);
   assert.match(panel, /tb-card-title">\{job\.custom \? jobTitle\(job\) : roTitle/);
   const vehicleAt = panel.indexOf('className="tb-card-vehicle"');
   const jobsAt = panel.lastIndexOf("<RequestedJobRow ");
   const quickAt = panel.indexOf('className="tb-quick"');
-  assert.ok(vehicleAt > 0 && quickAt > vehicleAt && jobsAt > quickAt, "on the schedule card the job row is below the vehicle line and the percent buttons");
+  assert.ok(vehicleAt > 0 && quickAt > vehicleAt && jobsAt > quickAt, "on the schedule card the job names stay below the vehicle line and the percent buttons");
   assert.match(css, /\.tb-card-jobs \{[^}]*margin-top:\s*auto/);
-  assert.match(css, /touch-action:\s*manipulation/);
-  assert.match(css, /min-height:\s*32px/);
-  assert.match(drawer, /data-testid="bayscan-request-button"/);
-  assert.match(src("../README.md"), /requested-job row/);
-  assert.equal(APP_VERSION, "v1.6.25");
+  assert.match(APP_VERSION, /^v1\.6\.2[5-9]$/);
 });

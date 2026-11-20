@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { SCAN_REQUEST_POLL_MS, boardScanStatusText, scanRequestActive, type ScanRequestView } from "./bayscan";
 import { BOARD_COLORS, cardColor } from "./colors";
 import { hiddenFromTech, wallEnd } from "./scheduler";
 import SuggestionBox from "./SuggestionBox";
@@ -27,6 +28,7 @@ type Data = {
   features?: { identifix?: boolean; identifixResults?: boolean }; checkins?: Checkin[];
   /** v1.6.17: only sent when IDENTIFIX_RESULTS_FOR_TECHS="1". */ identifixRequests?: IdentifixRequest[];
   requests?: { id: number; ro: string; status: string; createdAt: string }[];
+  scanRequest?: ScanRequestView | null;
 };
 const ISSUES = ["Need parts", "Wrong part", "Need help", "Waiting approval", "Found more work", "Done", "Diag Done"];
 const clock = (dayStart: number, minute: number) => {
@@ -53,7 +55,8 @@ export default function TechPage({ initial }: { initial?: Data }) {
     if (initial) return;
     fetch("/api/tech", { cache: "no-store" }).then((r) => r.json()).then((payload: Data) => setData(payload)).catch(() => setError("Could not load"));
   }, [initial]);
-  useEffect(() => { load(); const timer = setInterval(load, 60000); return () => clearInterval(timer); }, [load]);
+  const scanHot = Boolean(data?.scanRequest && scanRequestActive(data.scanRequest.status));
+  useEffect(() => { load(); const timer = setInterval(load, scanHot ? SCAN_REQUEST_POLL_MS : 60000); return () => clearInterval(timer); }, [load, scanHot]);
 
   async function post(body: Record<string, unknown>) {
     if (initial) return null;
@@ -93,7 +96,14 @@ export default function TechPage({ initial }: { initial?: Data }) {
       <header className="tech-head">
         <div><p className="panel-kicker">DELTA AUTO · TECH · Build {data.version}</p><h1>{tech.name}</h1>
           <p>{new Date(`${data.today}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })}</p></div>
-        <button onClick={() => post({ action: "logout" }).then(() => { setData(null); fetch("/api/tech").then((r) => r.json()).then(setData); })}>Sign out</button>
+        <div className="tech-head-actions">
+          <div className="tb-bayscan-bar" data-testid="bayscan-tech">
+            <button type="button" className="tb-bayscan-btn" data-testid="bayscan-tech-button" disabled={busy}
+              onClick={() => void post({ action: "bayscan-scan-request" })}>Bay Scan</button>
+            {data.scanRequest ? <p className="tb-bayscan-status" data-testid="bayscan-tech-status" data-status={data.scanRequest.status} role="status">{boardScanStatusText(data.scanRequest)}</p> : null}
+          </div>
+          <button onClick={() => post({ action: "logout" }).then(() => { setData(null); fetch("/api/tech").then((r) => r.json()).then(setData); })}>Sign out</button>
+        </div>
       </header>
       {error && <p className="tech-error">{error}</p>}
       <section className="tech-section">

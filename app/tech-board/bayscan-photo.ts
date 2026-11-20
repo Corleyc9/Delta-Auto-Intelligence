@@ -93,6 +93,22 @@ function postShape(row: { id: number; scanId: number; status: string }, ro: stri
   return { ok: true as const, requestId: row.id, scanId: row.scanId, ro: ro || "", status: row.status };
 }
 
+/**
+ * The Mac may pass the scanId it just received. That scan is used even when it is still unmatched,
+ * so the photo is stored on the scan and follows it when a writer (or a later VIN match) attaches the RO.
+ * Without scanId, the recent-scan lookup is unchanged.
+ */
+async function resolvePhotoScan(db: Db, deviceId: string, body: Record<string, unknown>, effectiveAt: string, vin: string) {
+  const present = Object.prototype.hasOwnProperty.call(body, "scanId") && body.scanId !== undefined && body.scanId !== null && body.scanId !== "";
+  if (!present) return { scan: await pickPhotoScan(db, deviceId, effectiveAt, vin) };
+  const raw = body.scanId;
+  const scanId = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
+  if (!Number.isInteger(scanId) || scanId < 1) return { error: Response.json({ error: "scanId is invalid" }, { status: 400 }) };
+  const scan = await getScan(db, scanId);
+  if (!scan || scan.deviceId !== deviceId) return { scan: null };
+  return { scan };
+}
+
 export async function postPhotoRequest(db: Db, body: Record<string, unknown>, deviceId: string, now = new Date()) {
   const id = text(deviceId, 40);
   if (!id) return Response.json({ error: "deviceId is required" }, { status: 400 });
@@ -110,7 +126,9 @@ export async function postPhotoRequest(db: Db, body: Record<string, unknown>, de
   const since = new Date(now.getTime() - PHOTO_RATE_WINDOW_MS).toISOString();
   if (await countRecentPhotoRequests(db, id, since) >= PHOTO_RATE_MAX) return Response.json({ error: "Too many photo requests" }, { status: 429 });
   const vin = normalizeVin(body.vin);
-  const scan = await pickPhotoScan(db, id, timing.effectiveAt, vin);
+  const picked = await resolvePhotoScan(db, id, body, timing.effectiveAt, vin);
+  if ("error" in picked) return picked.error;
+  const scan = picked.scan;
   if (!scan) return Response.json({ error: "No recent scan from this device", code: "no_scan" }, { status: 404 });
   try {
     const created = await insertPhotoRequest(db, { deviceId: id, clientId, requestedAt: timing.requestedAt, effectiveAt: timing.effectiveAt, vin, ageSec: timing.ageSec, scanId: scan.id, now: nowIso });
