@@ -11,7 +11,7 @@ import { searchRos, vinsMatch } from "./ro-search";
 import { ApptDetails, apptSummary } from "./ApptDetails";
 import { CheckinEditor, ScanModules } from "./DtcBox";
 import { ScanPhotos } from "./ScanPhotos";
-import type { RoScanView, ScanModule, ScanPhotoView } from "./bayscan";
+import { SCAN_REQUEST_POLL_MS, scanRequestActive, type RoScanView, type ScanModule, type ScanPhotoView, type ScanRequestView } from "./bayscan";
 import { checkinRo, type Checkin } from "./dtc";
 import { latestByRo, requestStatusText, type IdentifixRequest } from "./identifix";
 import { DIAG_END, blockRo, LUNCH_END, LUNCH_START, cardSpan, clampStart, dayWallLimit, isLockedJob, isStalled, wallEnd } from "./scheduler";
@@ -33,6 +33,7 @@ export type Board = {
   timeOff?: TimeOff[]; poolRequests?: PoolRequest[]; syncedRos?: SyncedRo[]; suggestions?: Suggestion[]; scheduleRequests?: ScheduleRequest[]; pinsSet?: string[]; version?: string;
   checkins?: Checkin[]; identifixRequests?: IdentifixRequest[];
   roVins?: Record<string, string>; unmatchedScans?: UnmatchedScan[]; roScans?: Record<string, RoScanView>;
+  scanRequests?: ScanRequestView[];
 };
 type UnmatchedScan = { id: number; deviceId: string; vin: string; receivedAt: string; matchCount: number; scan: { modules?: ScanModule[]; odometer: number | null; readinessSummary?: string }; photos?: ScanPhotoView[]; photoRequest?: "" | "pending" | "claimed" };
 
@@ -136,8 +137,8 @@ function EditBlock({ job, techs, days, dayStart, limit, unassigned, onSave, read
   );
 }
 
-function TicketDrawer({ job, latest, onClose, onSave, readOnly, techs, days, dayStart, limit, unassigned, ros, checkin, identifix, vin = "", bayScan = null }: {
-  checkin?: Checkin | null; identifix?: IdentifixRequest | null; vin?: string; bayScan?: RoScanView | null;
+function TicketDrawer({ job, latest, onClose, onSave, readOnly, techs, days, dayStart, limit, unassigned, ros, checkin, identifix, vin = "", bayScan = null, scanRequest = null }: {
+  checkin?: Checkin | null; identifix?: IdentifixRequest | null; vin?: string; bayScan?: RoScanView | null; scanRequest?: ScanRequestView | null;
   job: Job; latest?: Update; onClose: () => void; readOnly: boolean; onSave: Act;
   techs: Tech[]; days: string[]; dayStart: number; limit: number; unassigned: string; ros: SyncedRo[];
 }) {
@@ -169,7 +170,7 @@ function TicketDrawer({ job, latest, onClose, onSave, readOnly, techs, days, day
           {job.status === "preset" && <p className="tb-pinned-note">Pre-Set appointment: held at its set time. Drag it to change the time.</p>}
           {job.placedBy === "writer" && job.status !== "preset" && <p className="tb-pinned-note">Moved by a writer (kept as a preference) <button disabled={readOnly} onClick={() => onSave({ action: "unpin", ro: job.ro })}>Let the scheduler place it</button></p>}
           {job.detailUrl ? <a className="tb-link" href={job.detailUrl} target="_blank" rel="noreferrer">Open in Tekmetric →</a> : <span className="tb-link disabled">Tekmetric link unavailable</span>}
-          <CheckinEditor key={`ck-${checkin?.updatedAt ?? ""}-${bayScan?.id ?? 0}-${bayScan?.tekStatus ?? ""}-${bayScan?.photos?.map((photo) => photo.id).join(",") ?? ""}-${bayScan?.photoRequest ?? ""}`} ro={checkinRo(job)} checkin={checkin} vehicle={job.vehicle} customer={job.customer ?? ""} request={identifix} vin={vin} bayScan={bayScan} onSave={onSave} readOnly={readOnly} />
+          <CheckinEditor key={`ck-${checkin?.updatedAt ?? ""}-${bayScan?.id ?? 0}-${bayScan?.tekStatus ?? ""}-${bayScan?.photos?.map((photo) => photo.id).join(",") ?? ""}-${bayScan?.photoRequest ?? ""}`} ro={checkinRo(job)} checkin={checkin} vehicle={job.vehicle} customer={job.customer ?? ""} request={identifix} vin={vin} bayScan={bayScan} scanRequest={scanRequest} onSave={onSave} readOnly={readOnly} />
           <div className="tb-section"><small>Status</small>
             <div className="tb-issues">{ISSUES.map((issue) => <button key={issue} className={kind === issue ? "active" : ""} disabled={readOnly} onClick={() => { setKind(issue); save(issue); }}>{issue}</button>)}</div>
           </div>
@@ -332,7 +333,8 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
       .then((payload: Board) => { setBoard(payload); setDate((current) => current ?? payload.date); })
       .catch((reason: Error) => setError(reason.message));
   }, [initial]);
-  useEffect(() => { load(date); const timer = setInterval(() => load(date), 60000); return () => clearInterval(timer); }, [load, date]);
+  const scanHot = (board?.scanRequests ?? []).some((item) => scanRequestActive(item.status));
+  useEffect(() => { load(date); const timer = setInterval(() => load(date), scanHot ? SCAN_REQUEST_POLL_MS : 60000); return () => clearInterval(timer); }, [load, date, scanHot]);
 
   async function act(body: Record<string, unknown>) {
     if (initial) return false;
@@ -563,7 +565,8 @@ export default function TechBoardPanel({ initial, initialOpenRo }: { initial?: B
         onSave={async (body) => { await act(body); if (body.action === "delete") setOpenRo(null); }}
         techs={techs} days={board.days} dayStart={dayStart} limit={dayMinutes} unassigned={board.unassigned} ros={board.syncedRos ?? []} checkin={(board.checkins ?? []).find((item) => item.ro === checkinRo(openJob))}
         identifix={latestByRo(board.identifixRequests ?? []).get(checkinRo(openJob)) ?? null} vin={board.roVins?.[checkinRo(openJob)] ?? ""}
-        bayScan={board.roScans?.[checkinRo(openJob)] ?? null} />}
+        bayScan={board.roScans?.[checkinRo(openJob)] ?? null}
+        scanRequest={(board.scanRequests ?? []).find((item) => item.ro === checkinRo(openJob)) ?? null} />}
       {addSlot && <AddForm slot={addSlot} board={view} dayStart={dayStart} limit={dayMinutes} onClose={() => setAddSlot(null)} onSave={act} readOnly={Boolean(initial)} />}
     </section>
   );

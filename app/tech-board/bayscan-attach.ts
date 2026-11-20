@@ -7,9 +7,10 @@ import { addIdentifixRequest } from "./identifix-store.ts";
 import { saveCheckin } from "./checkin-store.ts";
 
 type Db = Parameters<typeof saveCheckin>[0];
-export async function attachScan(db: Db, scan: BayScan, ro: OpenRo, by: string, now: string, notify = true) {
+export async function attachScan(db: Db, scan: BayScan, ro: OpenRo, by: string, now: string, notify = true, noteExtra = "") {
   const codes = scanCodes(scan);
-  await saveCheckin(db, ro.ro, codes, scanNotes(scan), by, now);
+  const notes = [scanNotes(scan), noteExtra.trim()].filter(Boolean).join("\n").slice(0, 2000);
+  await saveCheckin(db, ro.ro, codes, notes, by, now);
   if (!codes.length) return 0;
   const value = { ro: ro.ro, customer: ro.customer, codes, symptom: scan.milOn ? "MIL on (Bay Scan check-in scan)" : "",
     vehicle: { ...splitVehicle(ro.vehicle), engine: "", vin: scan.vin, text: ro.vehicle } };

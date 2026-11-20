@@ -12,6 +12,7 @@ import { newIdentifixRequest, webhookBody } from "@/app/tech-board/identifix";
 import { notifyIdentifixWebhook } from "@/app/tech-board/identifix-notify";
 import { addIdentifixRequest, loadIdentifixRequests, getScan, loadRoScans, loadRoVins, loadUnmatchedScans, markScan, setRoVin } from "@/app/tech-board/store";
 import { normalizeVin, validVin } from "@/app/tech-board/bayscan";
+import { createScanRequest, loadScanRequestViews, scanRequestTarget } from "@/app/tech-board/bayscan-request";
 import { commitScanAttach } from "@/app/tech-board/bayscan-rematch";
 import { r2Bucket } from "@/app/lib/r2";
 import { runtimeEnv } from "@/app/lib/runtime";
@@ -33,7 +34,8 @@ export async function boardPayload(db: Awaited<ReturnType<typeof techBoardDb>>, 
   const roVins = Object.fromEntries(await loadRoVins(db)); // v1.6.18 writer-entered VINs
   const unmatchedScans = await loadUnmatchedScans(db);
   const roScans = await loadRoScans(db as never); // v1.6.21 per-module Bay Scan + Tekmetric attach status, by RO
-  return { identifixRequests, roVins, unmatchedScans, roScans, today, days, date: selected, techs, jobs: jobs.filter((job) => !job.hidden), updates, timeOff, poolRequests,
+  const scanRequests = await loadScanRequestViews(db as never, new Date().toISOString()); // v1.6.23 live Bay Scan request status
+  return { identifixRequests, roVins, unmatchedScans, roScans, scanRequests, today, days, date: selected, techs, jobs: jobs.filter((job) => !job.hidden), updates, timeOff, poolRequests,
     syncedRos, suggestions, scheduleRequests, checkins, pinsSet: pins.map((pin) => pin.initials), version: APP_VERSION, startDate: await getStartDate(db),
     unassigned: UNASSIGNED, lunch: { start: LUNCH_START, end: LUNCH_END } };
 }
@@ -78,7 +80,7 @@ const UPDATE_KINDS = ["note", "Need parts", "Wrong part", "Need help", "Waiting 
 
 export type BoardDb = Awaited<ReturnType<typeof techBoardDb>>;
 export const MUTATING_ACTIONS = ["move", "unpin", "update", "resize", "edit", "delete", "add-custom", "timeoff-save", "timeoff-delete",
-  "pool-request", "pool-decide", "suggest-add", "suggest-update", "schedule-request-add", "schedule-request-ack", "pin-set", "pin-clear", "recompute", "set-start-date", "dedupe-front-office", "remove-mirror-blocks", "add-ro", "checkin-set", "identifix-request", "ro-vin-set", "bayscan-attach", "bayscan-dismiss"];
+  "pool-request", "pool-decide", "suggest-add", "suggest-update", "schedule-request-add", "schedule-request-ack", "pin-set", "pin-clear", "recompute", "set-start-date", "dedupe-front-office", "remove-mirror-blocks", "add-ro", "checkin-set", "identifix-request", "ro-vin-set", "bayscan-attach", "bayscan-dismiss", "bayscan-scan-request"];
 
 /** Log a board change (never includes PINs). */
 async function logChange(db: BoardDb, source: string, actor: string, body: Record<string, unknown>, now: string) {
@@ -227,6 +229,14 @@ async function runBoardAction(db: BoardDb, body: Record<string, unknown> & { act
       if (!attached) return Response.json({ error: "That scan is no longer in Unmatched scans" }, { status: 404 });
       notice = `Scan attached to RO#${number} as a check-in scan.`;
     }
+  } else if (body.action === "bayscan-scan-request") {
+    // v1.6.23: anyone signed in to the board (including the shared Lobby TV login) can ask the Mac to scan this RO.
+    // No extra role gate. Does not create an RO.
+    const target = scanRequestTarget(body.ro, await loadSyncedRos(db), await loadJobs(db), (await loadRoVins(db as never)).get(String(body.ro || "").replace(/\D/g, "")) || "");
+    if ("error" in target) return Response.json({ error: target.error }, { status: target.status });
+    const saved = await createScanRequest(db as never, { ...target, requestedBy: auth.displayName }, now);
+    if ("error" in saved) return Response.json({ error: saved.error }, { status: saved.status });
+    notice = saved.created ? `Bay Scan requested for RO#${target.ro}. Waiting for the Mac.` : `Bay Scan is already requested for RO#${target.ro}.`;
   } else if (body.action === "checkin-set") {
     // v1.6.15: check-in scan codes for an RO (writer or Teams bot). Board only; triage, not a diagnosis.
     const ro = String(body.ro || "").replace(/\D/g, "");

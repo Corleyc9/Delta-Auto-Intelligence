@@ -58,7 +58,7 @@ Configure these on the Worker. Never commit values.
 | `TEKMETRIC_WEBHOOK_SECRET` | Optional shared secret. Put it in the webhook URL as `?secret=...` (Tekmetric’s Custom Integration UI is name + URL + event checkboxes; it does not document HMAC). Also accepted as `X-Tekmetric-Webhook-Secret`, `Authorization: Bearer`, or HMAC-SHA256 if a signature header is ever sent. |
 | `TEKMETRIC_SHOP_ID` | Optional. Defaults to `4326`. Events with a different shop id are stored but do not change shop signals. |
 | `TEKMETRIC_VERIFY_LABEL` | Optional. Exact Tekmetric Job Board label applied after dashboard **Verified**. Defaults to `Verified/Send Estimate` (slash, no spaces — confirmed on Devin’s teach demo). Set this only if the live chip text ever changes. |
-| `BAYSCAN_DEVICE_KEY` | Bay Scan handhelds. `POST /api/bayscan/scan` only. One shared secret, or per-bay `bay1:<secret>,bay2:<secret>`. Never a Tekmetric credential. |
+| `BAYSCAN_DEVICE_KEY` | Bay Scan devices. `POST /api/bayscan/scan`, `POST /api/bayscan/photo-request`, `POST /api/bayscan/scan-request/claim`, and `POST /api/bayscan/scan-request/status`. One shared secret, or per-bay `bay1:<secret>,bay2:<secret>`. Never a Tekmetric credential. |
 
 Logical bindings in `wrangler.toml` and `.openai/hosting.json`: `d1` = `DB`, `r2` = `BUCKET`. This rebuild does not reuse the previous Sites `project_id`.
 
@@ -213,13 +213,14 @@ Payroll tables, technician targets, GP formulas, and API payload shapes are unch
 
 ## Bay Scan check-in uploads
 
-Handhelds (the bay Raspberry Pi) POST a scan to `POST /api/bayscan/scan`. The route stores the scan in D1 and matches the VIN to the latest synced Job Board snapshot. It never creates a Tekmetric ticket.
+Handhelds (the bay Raspberry Pi) POST a scan to `POST /api/bayscan/scan`. The route stores the scan in D1 and matches the VIN to the latest synced Job Board snapshot. It never creates a Tekmetric ticket. v1.6.23 also lets the Tech Board ask the shop Mac to run that scan; see below.
 
-Auth is only this route:
+Device auth (the same headers on every Bay Scan device route):
 
 - Header `Authorization: Bearer <secret>`
 - Header `x-bayscan-device: bay1` (the device id; the body `deviceId` is the fallback)
 - Worker secret `BAYSCAN_DEVICE_KEY`: one shared secret, or per bay `bay1:<secret>,bay2:<secret>` (or the same map as JSON)
+- Routes: `POST /api/bayscan/scan`, `POST /api/bayscan/photo-request` (and its GET), `POST /api/bayscan/scan-request/claim`, `POST /api/bayscan/scan-request/status`
 
 A missing or wrong key returns **401** `Invalid device key`. If `BAYSCAN_DEVICE_KEY` is unset, the route returns **503** and does not crash. A single open-RO VIN match returns `matchedBy: "vin"`. If no full VIN matches, the last 6 characters match only when exactly one open RO fits (`matchedBy: "last6"`). `openRosWithoutVin` counts open job-board ROs that still have no VIN. Anything else stays on the Tech Board **Unmatched scans** list.
 
@@ -228,6 +229,38 @@ npx wrangler secret put BAYSCAN_DEVICE_KEY
 ```
 
 Do not put the secret value in git, logs, or the dashboard.
+
+## Bay Scan from the Tech Board (v1.6.23)
+
+Anyone signed in to the Tech Board, including the shared Lobby TV login, can press **Bay Scan** on an RO in the ticket drawer. That stores one scan request. Pressing again while that request is still active (`pending`, `claimed`, or `scanning`) returns the same row. The shop Mac listens in the background, claims the oldest pending request, runs the Bay Scan dongle, then posts the scan. On success it calls `POST /api/bayscan/photo-request` the same way the handheld did, and that photo lands on the same RO.
+
+The Mac uses the device auth above. It does not use the Tech Board bot key.
+
+A pending request expires after 5 minutes unclaimed. A claimed or scanning request expires 10 minutes after it was claimed if it is still not `done` or `failed`. Expiry runs on claim, on each board read, and before a `scanRequestId` scan is accepted. Only one request is claimed or scanning at a time.
+
+### `POST /api/bayscan/scan-request/claim`
+
+`200 { "request": { "id", "ro", "roId", "vin" } }` for the oldest pending request, which is then `claimed`. `roId` and `vin` are JSON `null` when the board does not know them. `200 { "request": null }` when nothing is waiting, or while another request is still `claimed` or `scanning`.
+
+### `POST /api/bayscan/scan-request/status`
+
+JSON `{ "id", "status": "scanning" | "failed" | "done", "reason"?, "message"? }` → `200 { "ok": true }`.
+
+Shop wording for reason codes: `no_dongle` (Dongle not found), `no_car_power`, `no_ecu`, `upload_failed`, `vin_mismatch`. A request that is already `done` or `failed` stays that way. `scanning` does not revive an `expired` request. `done` or `failed` on an expired request is still recorded.
+
+An unknown id is **404**. A missing id, or a status outside that set, is **400**.
+
+### `POST /api/bayscan/scan`
+
+The existing body takes an optional `scanRequestId`. When that id is an open request, the scan is saved on **that** RO (a VIN is still required). If the VIN matches a different open RO, the clicked RO still gets the scan, and the saved scan plus the check-in notes say the VIN does not match. The request is marked `done`. Notes, the PDF, the attach queue, and photo handling then run exactly as they do for a VIN-matched scan.
+
+The success body keeps the usual fields (`matched`, `ro`, `customer`, `vehicle`, `scanId`, `display`, `openRosWithoutVin`) and adds `matchedBy: "request"`, `vinMismatch` (boolean), and `scanRequestId`.
+
+Without `scanRequestId`, matching stays full VIN, then unique last-6, and the response is unchanged.
+
+A `scanRequestId` that is present but not a positive integer is **400** `scanRequestId is invalid` (it does not fall through to VIN matching). An unknown id is **404**. A request that is already `done`, `failed`, or `expired` is **409** `Scan request is not open`.
+
+Reports still go only on that RO's own Bay Scan check-in report concern, through the existing attach queue. This does not create an RO and does not approve, authorize, send, or pay.
 
 ## Production cutover for `deltaintelligence.cc` (not done in this repo)
 

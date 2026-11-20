@@ -200,7 +200,8 @@ test("manual attach, routes, and cron stay inside the Bay Scan rules", () => {
   assert.ok(actions.includes("commitScanAttach("));
   assert.ok(src("../app/tech-board/bayscan-maintain.ts").includes("rematchUnmatchedScans("));
   const scanRoute = src("../app/api/bayscan/scan/route.ts");
-  assert.ok(scanRoute.includes("deviceAuth(") && scanRoute.includes("publishBayScanAttachment("));
+  assert.ok(scanRoute.includes("deviceAuth(") && scanRoute.includes("saveMatchedBayScan("));
+  assert.ok(src("../app/tech-board/bayscan-request.ts").includes("publishBayScanAttachment("));
   assert.ok(!scanRoute.includes("botAuth"));
   assert.match(scanRoute, /return Response\.json\(\{ \.\.\.scanReply\(match, id\)/);
   const attach = src("../app/api/bayscan/attach/route.ts");
@@ -213,7 +214,7 @@ test("manual attach, routes, and cron stay inside the Bay Scan rules", () => {
   assert.ok(src("../app/tech-board/DtcBox.tsx").includes("Bay Scan report"));
   const panel = src("../app/tech-board/TechBoardPanel.tsx");
   assert.ok(panel.includes("/bayscan/report/"));
-  assert.match(src("../app/lib/version.ts"), /"v1\.6\.22"/);
+  assert.match(src("../app/lib/version.ts"), /"v1\.6\.2[2-9]"/);
 });
 
 test("giving up after the attempt cap is a failed status the board can show", async () => {
